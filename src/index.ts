@@ -285,7 +285,7 @@ async function autoConfirmStaleOrders() {
       }
       const [cu] = await db.select({ xp: usersTable.xp }).from(usersTable).where(eq(usersTable.id, order.customerId));
       const cuXp = (cu?.xp ?? 0) + 10;
-      await db.update(usersTable).set({ xp: cuXp, level: autoCalcLevel(cuXp) }).where(eq(usersTable.id, order.customerId));
+      await db.update(usersTable).set({ xp: cuXp, level: calcLevel(cuXp) }).where(eq(usersTable.id, order.customerId));
       emitToUser(order.customerId, { type: 'order_status', orderId: order.id, title: 'Заказ завершён', message: 'Автоматически подтверждён через 24 часа' });
       await db.insert(orderHistoryTable).values({ orderId: order.id, status: 'completed', note: 'Auto-confirmed: 24h timeout' });
       console.log(`[AUTO-CONFIRM] ${order.id}`);
