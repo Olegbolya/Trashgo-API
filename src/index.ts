@@ -24,6 +24,7 @@ import { orders as ordersTable, users as usersTable, orderHistory as orderHistor
 import { addClient, connectedCount, emitToUser, setFcmFallback } from './ws.js';
 import { sendPushNotification } from './lib/firebase-admin.js';
 import { startSubscriptionCron } from './lib/subscriptionCron.js';
+import { hasTelegram, sendTelegramNotification, getBotUsername } from './lib/telegram.js';
 
 const app = new Hono();
 
@@ -200,6 +201,12 @@ async function sendTelegramMessage(chatId: string, text: string) {
   }).catch(() => {});
 }
 
+// GET /api/v1/auth/bot-info — public, returns Telegram bot username for deep-link construction
+app.get('/api/v1/auth/bot-info', async (c) => {
+  const username = await getBotUsername();
+  return c.json({ username });
+});
+
 // 404 handler
 app.notFound((c) => c.json({ error: { code: 'NOT_FOUND', message: 'Route not found' } }, 404));
 
@@ -258,19 +265,21 @@ async function runMigrations() {
 
 await runMigrations();
 
-// FCM fallback: when a user has no SSE connection, push via FCM
+// Fallback: when a user has no SSE connection, push via FCM and/or Telegram
 setFcmFallback(async (userId, event) => {
   try {
-    const userRow = await db.select({ fcmToken: usersTable.fcmToken }).from(usersTable).where(eq(usersTable.id, userId)).limit(1);
-    const token = userRow[0]?.fcmToken;
-    if (!token) return;
-    await sendPushNotification(
-      token,
-      String(event.title ?? 'TrashGo'),
-      String(event.message ?? ''),
-      event.orderId ? { orderId: String(event.orderId) } : undefined,
-    );
-  } catch { /* FCM failure is non-fatal */ }
+    const userRow = await db.select({ fcmToken: usersTable.fcmToken, telegramChatId: usersTable.telegramChatId })
+      .from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+    const { fcmToken, telegramChatId } = userRow[0] ?? {};
+    const title = String(event.title ?? 'TrashGo');
+    const message = String(event.message ?? '');
+    if (fcmToken) {
+      await sendPushNotification(fcmToken, title, message, event.orderId ? { orderId: String(event.orderId) } : undefined);
+    }
+    if (telegramChatId && hasTelegram()) {
+      await sendTelegramNotification(telegramChatId, title, message);
+    }
+  } catch { /* non-fatal */ }
 });
 
 

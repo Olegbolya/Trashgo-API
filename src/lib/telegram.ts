@@ -3,6 +3,25 @@ const API = () => `https://api.telegram.org/bot${TOKEN}`;
 
 export const hasTelegram = () => !!TOKEN;
 
+export async function sendTelegramNotification(chatId: string, title: string, body: string): Promise<boolean> {
+  if (!TOKEN) return false;
+  const text = `*${escapeMarkdown(title)}*\n${escapeMarkdown(body)}`;
+  try {
+    const res = await fetch(`${API()}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function escapeMarkdown(s: string) {
+  return s.replace(/([*_`\[])/g, '\\$1');
+}
+
 export async function sendTelegramOtp(chatId: number | string, code: string): Promise<boolean> {
   if (!TOKEN) return false;
   try {
