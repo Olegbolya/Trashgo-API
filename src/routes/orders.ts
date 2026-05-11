@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { eq, desc, sql, asc, and, ne, inArray, like } from 'drizzle-orm';
+import { eq, desc, sql, asc, and, ne, inArray, like, lt } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { orders, orderHistory, users, messages, referrals } from '../db/schema.js';
 import { authMiddleware, type JwtPayload } from '../middleware/auth.js';
@@ -51,24 +51,31 @@ const completeOrderSchema = z.object({
   completionPhotoUrls: z.array(photoUrlSchema).max(5).default([]),
 });
 
-// GET /orders — list my orders
+// GET /orders — list my orders (offset pagination)
 // ?mode=contractor → orders I accepted (contractorId = me)
-// default → orders I created (customerId = me)
+// ?offset=0&limit=20
 ordersRouter.get('/', async (c) => {
   const user = c.get('user');
   const mode = c.req.query('mode');
+  const limit = Math.min(50, Math.max(1, parseInt(c.req.query('limit') ?? '20', 10) || 20));
+  const offset = Math.max(0, parseInt(c.req.query('offset') ?? '0', 10) || 0);
 
   const field = mode === 'contractor' ? orders.contractorId : orders.customerId;
 
+  // Fetch limit+1 to detect hasMore without a COUNT query
   const result = await db.select()
     .from(orders)
     .where(eq(field, user.userId))
     .orderBy(desc(orders.createdAt))
-    .limit(50);
+    .limit(limit + 1)
+    .offset(offset);
 
-  // Fetch counterpart names for history display (task 16)
+  const hasMore = result.length > limit;
+  const page = hasMore ? result.slice(0, limit) : result;
+
+  // Fetch counterpart names for history display
   const counterpartIds = [...new Set(
-    result.map(o => mode === 'contractor' ? o.customerId : o.contractorId).filter(Boolean) as string[]
+    page.map(o => mode === 'contractor' ? o.customerId : o.contractorId).filter(Boolean) as string[]
   )];
   const counterparts: Record<string, string> = {};
   if (counterpartIds.length > 0) {
@@ -79,35 +86,49 @@ ordersRouter.get('/', async (c) => {
   }
 
   return c.json({
-    data: result.map(o => ({
+    data: page.map(o => ({
       ...formatOrder(o),
       ...(mode === 'contractor'
         ? { customerName: counterparts[o.customerId] ?? '' }
         : { contractorName: o.contractorId ? (counterparts[o.contractorId] ?? '') : '' }
       ),
     })),
-    meta: { total: result.length },
+    meta: { hasMore, nextOffset: hasMore ? offset + limit : null },
   });
 });
 
-// GET /orders/available — all open orders except ones created by the current user
+// GET /orders/available — open orders (cursor pagination by createdAt)
+// ?district=X&cursor=<ISO timestamp>&limit=20
 ordersRouter.get('/available', async (c) => {
   const user = c.get('user');
-  const district = c.req.query('district');
+  const district = c.req.query('district') || null;
+  const cursor = c.req.query('cursor') || null;
+  const limit = Math.min(50, Math.max(1, parseInt(c.req.query('limit') ?? '20', 10) || 20));
 
+  const conditions: ReturnType<typeof eq>[] = [
+    eq(orders.status, 'new') as any,
+    ne(orders.customerId, user.userId) as any,
+  ];
+  if (district) conditions.push(eq(orders.district, district) as any);
+  if (cursor) {
+    const cursorDate = new Date(cursor);
+    if (!isNaN(cursorDate.getTime())) conditions.push(lt(orders.createdAt, cursorDate) as any);
+  }
+
+  // Fetch limit+1 to detect hasMore
   const result = await db.select()
     .from(orders)
-    .where(and(eq(orders.status, 'new'), ne(orders.customerId, user.userId)))
+    .where(and(...conditions))
     .orderBy(desc(orders.createdAt))
-    .limit(50);
+    .limit(limit + 1);
 
-  const filtered = district
-    ? result.filter((o) => o.district === district)
-    : result;
+  const hasMore = result.length > limit;
+  const page = hasMore ? result.slice(0, limit) : result;
+  const nextCursor = hasMore ? page[page.length - 1].createdAt.toISOString() : null;
 
   return c.json({
-    data: filtered.map(formatOrder),
-    meta: { total: filtered.length },
+    data: page.map(formatOrder),
+    meta: { hasMore, nextCursor },
   });
 });
 
