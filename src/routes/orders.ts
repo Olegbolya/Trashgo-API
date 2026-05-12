@@ -187,14 +187,23 @@ ordersRouter.get('/:id', async (c) => {
     .from(orders).where(and(eq(orders.customerId, row.order.customerId), eq(orders.status, 'completed')));
   customerCompletedOrders = Number(custRow?.cnt ?? 0);
 
-  // acceptedAt: used for 10-min customer cancel window
-  if (row.order.status !== 'new') {
-    const [hist] = await db.select({ createdAt: orderHistory.createdAt })
-      .from(orderHistory)
-      .where(and(eq(orderHistory.orderId, id), eq(orderHistory.status, 'accepted')))
-      .limit(1);
-    if (hist) acceptedAt = hist.createdAt.toISOString();
-  }
+  // Order history timeline + acceptedAt
+  const historyRows = await db.select({
+    status: orderHistory.status,
+    createdAt: orderHistory.createdAt,
+    note: orderHistory.note,
+  }).from(orderHistory)
+    .where(eq(orderHistory.orderId, id))
+    .orderBy(asc(orderHistory.createdAt));
+
+  const history = historyRows.map(h => ({
+    status: h.status,
+    createdAt: h.createdAt.toISOString(),
+    note: h.note,
+  }));
+
+  const acceptedRow = historyRows.find(h => h.status === 'accepted');
+  if (acceptedRow) acceptedAt = acceptedRow.createdAt.toISOString();
 
   return c.json({ data: {
     ...formatOrder(row.order),
@@ -209,6 +218,7 @@ ordersRouter.get('/:id', async (c) => {
     contractorRatingCount,
     contractorCompletedOrders,
     acceptedAt,
+    history,
   } });
 });
 
