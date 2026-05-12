@@ -10,6 +10,7 @@ import { checkReferralAchievements } from '../lib/achievements.js';
 import { emitToUser } from '../ws.js';
 import { sendOtp, hasSms } from '../lib/sms.js';
 import { hasTelegram, sendTelegramOtp, getBotUsername } from '../lib/telegram.js';
+import { telegramTokens, cleanupTelegramTokens } from '../lib/telegramTokens.js';
 import { verifyFirebaseIdToken, isFirebaseAdminReady } from '../lib/firebase-admin.js';
 import { sendEmailOtp, isEmailEnabled } from '../lib/email.js';
 import { rateLimit } from '../lib/rateLimit.js';
@@ -101,8 +102,12 @@ auth.post('/login', async (c) => {
       channel = 'telegram';
     } else {
       const botUsername = await getBotUsername();
-      const phoneEncoded = encodeURIComponent(phone);
-      telegramBotLink = botUsername ? `https://t.me/${botUsername}?start=${phoneEncoded}` : undefined;
+      if (botUsername) {
+        cleanupTelegramTokens();
+        const startToken = nanoid(8);
+        telegramTokens.set(startToken, { phone, code, exp: Date.now() + 10 * 60 * 1000 });
+        telegramBotLink = `https://t.me/${botUsername}?start=${startToken}`;
+      }
       channel = 'telegram';
     }
   } else if (useSms) {
