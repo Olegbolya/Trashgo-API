@@ -17,6 +17,7 @@ import referralsRoutes from './routes/referrals.js';
 import achievementsRoutes from './routes/achievements.js';
 import subscriptionsRoutes from './routes/subscriptions.js';
 import leaderboardRoutes from './routes/leaderboard.js';
+import adminRoutes from './routes/admin.js';
 import { db } from './db/index.js';
 import { calcLevel } from './lib/achievements.js';
 import { sql, and, eq, lt } from 'drizzle-orm';
@@ -93,6 +94,7 @@ app.route('/api/v1/referrals', referralsRoutes);
 app.route('/api/v1/achievements', achievementsRoutes);
 app.route('/api/v1/subscriptions', subscriptionsRoutes);
 app.route('/api/v1/leaderboard', leaderboardRoutes);
+app.route('/api/v1/admin', adminRoutes);
 
 // Geocoding proxy — avoids Nominatim browser User-Agent restrictions
 // ?q=... &limit=N (default 1, max 5)
