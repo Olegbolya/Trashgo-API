@@ -1,7 +1,8 @@
 import { db } from '../db/index.js';
-import { subscriptions, orders } from '../db/schema.js';
+import { subscriptions, orders, users } from '../db/schema.js';
 import { eq, and, gte } from 'drizzle-orm';
 import { emitToUser } from '../ws.js';
+import { sendSubscriptionOrderEmail } from './email.js';
 
 // Prevent double-run within the same calendar day (Moscow time)
 let lastRunDate = '';
@@ -75,6 +76,19 @@ export async function runSubscriptionCron() {
         message: `Заказ на ${dateStr} по адресу ${sub.address} выставлен исполнителям`,
         orderId: newOrder.id,
       });
+
+      // Email notification (fire and forget)
+      db.select({ email: users.notifEmailAddress, notif: users.notifEmail })
+        .from(users).where(eq(users.id, sub.customerId)).limit(1)
+        .then(([u]) => {
+          if (u?.notif && u.email) {
+            sendSubscriptionOrderEmail(u.email, {
+              address: sub.address,
+              scheduledDate: scheduledAt.toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long' }),
+              price: sub.price,
+            }).catch(() => {});
+          }
+        }).catch(() => {});
 
       created++;
       console.log(`[SubscriptionCron] Created order ${newOrder.id} for sub ${sub.id}`);

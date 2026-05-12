@@ -11,6 +11,9 @@ import {
   checkEcoAchievements, checkCustomerOrderAchievements, checkVehicleAchievements,
   checkTenureAchievements, calcLevel,
 } from '../lib/achievements.js';
+import {
+  sendOrderAcceptedEmail, sendOrderCompletedEmail, sendOrderConfirmedEmail, sendOrderCancelledEmail,
+} from '../lib/email.js';
 
 const ordersRouter = new Hono<{ Variables: { user: JwtPayload } }>();
 
@@ -373,6 +376,38 @@ ordersRouter.patch('/:id/status', async (c) => {
     emitToUser(updatedOrder.contractorId, event);
   }
 
+  // Email notifications (fire and forget)
+  if (status === 'accepted' && updatedOrder.customerId) {
+    db.select({ email: users.notifEmailAddress, notif: users.notifEmail })
+      .from(users).where(eq(users.id, updatedOrder.customerId)).limit(1)
+      .then(([cu]) => {
+        if (cu?.notif && cu.email) {
+          db.select({ name: users.name }).from(users).where(eq(users.id, user.userId)).limit(1).then(([c]) => {
+            sendOrderAcceptedEmail(cu.email!, {
+              contractorName: c?.name ?? 'Исполнитель',
+              address: updatedOrder.address,
+              scheduledAt: updatedOrder.scheduledAt?.toISOString() ?? null,
+              price: updatedOrder.price,
+              orderId: id,
+            }).catch(() => {});
+          }).catch(() => {});
+        }
+      }).catch(() => {});
+  }
+  if (status === 'cancelled') {
+    const cancelledBy = order.customerId === user.userId ? 'customer' : 'contractor';
+    const notifyId = cancelledBy === 'customer' ? updatedOrder.contractorId : updatedOrder.customerId;
+    if (notifyId) {
+      db.select({ email: users.notifEmailAddress, notif: users.notifEmail })
+        .from(users).where(eq(users.id, notifyId)).limit(1)
+        .then(([u]) => {
+          if (u?.notif && u.email) {
+            sendOrderCancelledEmail(u.email, { address: updatedOrder.address, cancelledBy }).catch(() => {});
+          }
+        }).catch(() => {});
+    }
+  }
+
   return c.json({ data: formatOrder(updated[0]) });
 });
 
@@ -414,6 +449,22 @@ ordersRouter.post('/:id/complete', async (c) => {
     status: 'pending_confirmation',
     note: `Contractor ${user.userId} submitted completion photos`,
   });
+
+  // Email customer to confirm (fire and forget)
+  const completeOrder = updated[0];
+  db.select({ email: users.notifEmailAddress, notif: users.notifEmail })
+    .from(users).where(eq(users.id, completeOrder.customerId)).limit(1)
+    .then(([cu]) => {
+      if (cu?.notif && cu.email) {
+        db.select({ name: users.name }).from(users).where(eq(users.id, user.userId)).limit(1).then(([ct]) => {
+          sendOrderCompletedEmail(cu.email!, {
+            address: completeOrder.address,
+            contractorName: ct?.name ?? 'Исполнитель',
+            orderId: id,
+          }).catch(() => {});
+        }).catch(() => {});
+      }
+    }).catch(() => {});
 
   return c.json({ data: formatOrder(updated[0]) });
 });
@@ -477,6 +528,17 @@ ordersRouter.post('/:id/confirm', async (c) => {
       return c.json({ error: { code: 'CONFLICT', message: 'Order already confirmed' } }, 409);
     }
     throw err;
+  }
+
+  // Email contractor: payment confirmed (fire and forget)
+  if (order.contractorId) {
+    db.select({ email: users.notifEmailAddress, notif: users.notifEmail })
+      .from(users).where(eq(users.id, order.contractorId)).limit(1)
+      .then(([ct]) => {
+        if (ct?.notif && ct.email) {
+          sendOrderConfirmedEmail(ct.email, { address: order.address, amount: order.price }).catch(() => {});
+        }
+      }).catch(() => {});
   }
 
   // Check achievements for both parties (fire and forget — don't block response)
