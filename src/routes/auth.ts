@@ -95,24 +95,27 @@ auth.post('/login', async (c) => {
   if (useEmail && deliveryEmail) {
     await sendEmailOtp(deliveryEmail, code);
     channel = 'email';
-  } else if (useTelegram) {
-    const chatId = existing[0]?.telegramChatId;
-    if (chatId) {
-      await sendTelegramOtp(chatId, code);
-      channel = 'telegram';
-    } else {
-      const botUsername = await getBotUsername();
-      if (botUsername) {
-        cleanupTelegramTokens();
-        const startToken = nanoid(8);
-        telegramTokens.set(startToken, { phone, code, exp: Date.now() + 10 * 60 * 1000 });
-        telegramBotLink = `https://t.me/${botUsername}?start=${startToken}`;
-      }
-      channel = 'telegram';
-    }
+  } else if (useTelegram && existing[0]?.telegramChatId) {
+    // User already linked Telegram — OTP arrives as a direct notification, no bot interaction needed
+    await sendTelegramOtp(existing[0].telegramChatId, code);
+    channel = 'telegram';
   } else if (useSms) {
+    // SMS available — deliver directly, no Telegram interaction needed
     await sendOtp(phone, code);
     channel = 'sms';
+  } else if (useTelegram) {
+    // No chatId and no SMS — show bot link as last resort (one-time tap to link Telegram)
+    const botUsername = await getBotUsername();
+    if (botUsername) {
+      cleanupTelegramTokens();
+      const startToken = nanoid(8);
+      telegramTokens.set(startToken, { phone, code, exp: Date.now() + 10 * 60 * 1000 });
+      telegramBotLink = `https://t.me/${botUsername}?start=${startToken}`;
+      channel = 'telegram';
+    } else {
+      console.log(`[OTP DEV] ${phone}: ${code}`);
+      channel = 'dev';
+    }
   } else {
     console.log(`[OTP DEV] ${phone}: ${code}`);
     channel = 'dev';
@@ -120,7 +123,7 @@ auth.post('/login', async (c) => {
 
   return c.json({
     data: {
-      otpSent: channel !== 'telegram' || !!existing[0]?.telegramChatId,
+      otpSent: !telegramBotLink,
       isNewUser: existing.length === 0,
       channel,
       ...(telegramBotLink ? { telegramBotLink } : {}),
