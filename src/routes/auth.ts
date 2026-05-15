@@ -158,11 +158,17 @@ auth.post('/verify', async (c) => {
     return c.json({ error: { code: 'INVALID_OTP', message: 'Wrong or expired code' } }, 400);
   }
 
-  // Mark OTP as used
+  // Find user BEFORE marking OTP used — frozen check must not consume the code
+  const userRows = await db.select().from(users).where(eq(users.phone, phone)).limit(1);
+
+  // Block frozen accounts before consuming the OTP
+  if (userRows.length > 0 && (userRows[0] as any).frozen) {
+    return c.json({ error: { code: 'ACCOUNT_FROZEN', message: 'Ваш аккаунт заморожен. Обратитесь в поддержку.' } }, 403);
+  }
+
+  // Mark OTP as used only after confirming the account can proceed
   await db.update(otpCodes).set({ used: 1 }).where(eq(otpCodes.id, otp[0].id));
 
-  // Find user
-  const userRows = await db.select().from(users).where(eq(users.phone, phone)).limit(1);
   if (userRows.length === 0) {
     return c.json({
       data: { verified: true, isNewUser: true },
@@ -170,11 +176,6 @@ auth.post('/verify', async (c) => {
   }
 
   let userRow = userRows[0];
-
-  // Block frozen accounts from logging in
-  if ((userRow as any).frozen) {
-    return c.json({ error: { code: 'ACCOUNT_FROZEN', message: 'Ваш аккаунт заморожен. Обратитесь в поддержку.' } }, 403);
-  }
 
   // Update role if the user is switching roles
   if (role && role !== userRow.role) {

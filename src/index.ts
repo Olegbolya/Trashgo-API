@@ -19,7 +19,7 @@ import subscriptionsRoutes from './routes/subscriptions.js';
 import leaderboardRoutes from './routes/leaderboard.js';
 import adminRoutes from './routes/admin.js';
 import { db } from './db/index.js';
-import { calcLevel } from './lib/achievements.js';
+import { calcLevel, checkOrderAchievements, checkVolumeAchievements, checkDistrictAchievements, checkTimeAchievements, checkAsapAchievements, checkEcoAchievements, checkVehicleAchievements, checkTenureAchievements } from './lib/achievements.js';
 import { sql, and, eq, lt } from 'drizzle-orm';
 import { orders as ordersTable, users as usersTable, orderHistory as orderHistoryTable } from './db/schema.js';
 import { addClient, connectedCount, emitToUser, setFcmFallback } from './ws.js';
@@ -318,6 +318,17 @@ async function autoConfirmStaleOrders() {
       await db.update(usersTable).set({ xp: cuXp, level: calcLevel(cuXp) }).where(eq(usersTable.id, order.customerId));
       emitToUser(order.customerId, { type: 'order_status', orderId: order.id, title: 'Заказ завершён', message: 'Автоматически подтверждён через 24 часа' });
       await db.insert(orderHistoryTable).values({ orderId: order.id, status: 'completed', note: 'Auto-confirmed: 24h timeout' });
+      // Achievement checks (same as manual confirm, fire-and-forget)
+      checkEcoAchievements(order.customerId).catch(() => {});
+      if (order.contractorId) {
+        checkOrderAchievements(order.contractorId, 'contractor').catch(() => {});
+        checkVolumeAchievements(order.contractorId).catch(() => {});
+        checkDistrictAchievements(order.contractorId).catch(() => {});
+        checkTimeAchievements(order.contractorId).catch(() => {});
+        checkVehicleAchievements(order.contractorId).catch(() => {});
+        checkTenureAchievements(order.contractorId).catch(() => {});
+        if (order.asap) checkAsapAchievements(order.contractorId).catch(() => {});
+      }
       console.log(`[AUTO-CONFIRM] ${order.id}`);
     }
   } catch (e: any) { console.error('[AUTO-CONFIRM]', e.message); }

@@ -11,7 +11,10 @@ router.use('*', authMiddleware);
 const SubSchema = z.object({
   address: z.string().min(3).max(300),
   district: z.string().max(100).default(''),
-  days: z.array(z.number().int().min(1).max(7)).min(1),
+  days: z.array(z.number().int().min(1).max(7)).min(1).refine(
+    (arr) => new Set(arr).size === arr.length,
+    { message: 'Days must be unique' }
+  ),
   time: z.string().regex(/^\d{2}:\d{2}$/).default('18:00'),
   volume: z.number().int().min(1).max(30).default(1),
   price: z.number().int().min(1),
@@ -22,7 +25,13 @@ const SubSchema = z.object({
 router.get('/', async (c) => {
   const { userId } = c.get('user');
   const rows = await db.select().from(subscriptions).where(eq(subscriptions.customerId, userId));
-  return c.json({ data: rows.map(r => ({ ...r, days: JSON.parse(r.days) })) });
+  return c.json({
+    data: rows.map(r => {
+      let days: number[] = [];
+      try { days = JSON.parse(r.days); } catch { days = []; }
+      return { ...r, days };
+    }),
+  });
 });
 
 // POST /subscriptions
@@ -37,7 +46,9 @@ router.post('/', async (c) => {
     ...rest,
     days: JSON.stringify(days),
   }).returning();
-  return c.json({ data: { ...sub, days: JSON.parse(sub.days) } }, 201);
+  let createdDays: number[] = [];
+  try { createdDays = JSON.parse(sub.days); } catch { createdDays = []; }
+  return c.json({ data: { ...sub, days: createdDays } }, 201);
 });
 
 // PATCH /subscriptions/:id — update (pause/resume/reschedule)
@@ -63,7 +74,9 @@ router.patch('/:id', async (c) => {
     .where(and(eq(subscriptions.id, id), eq(subscriptions.customerId, userId)))
     .returning();
   if (!sub) return c.json({ error: { code: 'NOT_FOUND' } }, 404);
-  return c.json({ data: { ...sub, days: JSON.parse(sub.days) } });
+  let parsedDays: number[] = [];
+  try { parsedDays = JSON.parse(sub.days); } catch { parsedDays = []; }
+  return c.json({ data: { ...sub, days: parsedDays } });
 });
 
 // DELETE /subscriptions/:id
