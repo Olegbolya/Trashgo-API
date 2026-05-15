@@ -122,4 +122,12 @@ adminRouter.get('/disputes/payment', async (c) => {
   return c.json({ data: rows });
 });
 
+// POST /admin/run-subscription-cron — manually trigger subscription cron for testing
+adminRouter.post('/run-subscription-cron', async (c) => {
+  if (!checkAdmin(c)) return forbidden(c);
+  const { runSubscriptionCron } = await import('../lib/subscriptionCron.js');
+  await runSubscriptionCron();
+  return c.json({ data: { ok: true, note: 'Ran. Creates orders only during 06:00 Moscow hour unless that window is active.' } });
+});
+
 export default adminRouter;
