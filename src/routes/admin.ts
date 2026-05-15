@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { eq, count, sum, like, desc, sql } from 'drizzle-orm';
+import { eq, count, sum, like, desc, sql, or, ilike } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { users, orders, orderHistory } from '../db/schema.js';
 
@@ -120,6 +120,49 @@ adminRouter.get('/disputes/payment', async (c) => {
     .orderBy(desc(orderHistory.createdAt))
     .limit(50);
   return c.json({ data: rows });
+});
+
+// GET /admin/users?phone=xxx — search users by phone or name
+adminRouter.get('/users', async (c) => {
+  if (!checkAdmin(c)) return forbidden(c);
+  const q = (c.req.query('phone') ?? '').trim();
+  if (!q) return c.json({ data: [] });
+  const rows = await db.select({
+    id: users.id, phone: users.phone, name: users.name, role: users.role,
+    frozen: users.frozen, freezeReason: users.freezeReason,
+    balance: users.balance, xp: users.xp, createdAt: users.createdAt,
+  }).from(users)
+    .where(or(ilike(users.phone, `%${q}%`), ilike(users.name, `%${q}%`)))
+    .orderBy(desc(users.createdAt))
+    .limit(20);
+  return c.json({ data: rows });
+});
+
+// GET /admin/users/:id/orders — orders for a specific user
+adminRouter.get('/users/:id/orders', async (c) => {
+  if (!checkAdmin(c)) return forbidden(c);
+  const id = c.req.param('id');
+  const rows = await db.select({
+    id: orders.id, address: orders.address, status: orders.status,
+    price: orders.price, createdAt: orders.createdAt,
+    customerId: orders.customerId, contractorId: orders.contractorId,
+  }).from(orders)
+    .where(or(eq(orders.customerId, id), eq(orders.contractorId, id)))
+    .orderBy(desc(orders.createdAt))
+    .limit(50);
+  return c.json({ data: rows });
+});
+
+// POST /admin/disputes/:id/close — mark dispute as resolved
+adminRouter.post('/disputes/:id/close', async (c) => {
+  if (!checkAdmin(c)) return forbidden(c);
+  const id = c.req.param('id');
+  const body = await c.req.json().catch(() => ({}));
+  const resolution = (body as any)?.resolution || 'Закрыт администратором';
+  await db.update(orderHistory)
+    .set({ note: sql`note || ' [CLOSED: ' || ${resolution} || ']'` } as any)
+    .where(eq(orderHistory.id, id));
+  return c.json({ data: { ok: true } });
 });
 
 // POST /admin/run-subscription-cron — manually trigger subscription cron for testing

@@ -233,4 +233,38 @@ usersRouter.post('/admin/unfreeze/:id', async (c) => {
   return c.json({ data: { ok: true } });
 });
 
+// GET /users/my-contractors — contractors the customer has worked with
+usersRouter.get('/my-contractors', async (c) => {
+  const { userId } = c.get('user');
+  // Get distinct contractors from customer's completed orders
+  const rows = await db
+    .selectDistinct({
+      id: users.id,
+      name: users.name,
+      district: users.district,
+      transportMode: users.transportMode,
+      xp: users.xp,
+      level: users.level,
+      avgRating: avg(orders.ratingByCustomer),
+      ordersCompleted: count(orders.id),
+    })
+    .from(orders)
+    .innerJoin(users, eq(users.id, orders.contractorId))
+    .where(and(eq(orders.customerId, userId), eq(orders.status, 'completed'), isNotNull(orders.contractorId)))
+    .groupBy(users.id, users.name, users.district, users.transportMode, users.xp, users.level)
+    .orderBy(desc(count(orders.id)))
+    .limit(20);
+
+  return c.json({ data: rows.map(r => ({
+    id: r.id,
+    name: r.name,
+    district: r.district,
+    transportMode: r.transportMode,
+    xp: r.xp,
+    level: r.level,
+    avgRating: r.avgRating ? Number(Number(r.avgRating).toFixed(1)) : null,
+    ordersCompleted: Number(r.ordersCompleted),
+  })) });
+});
+
 export default usersRouter;

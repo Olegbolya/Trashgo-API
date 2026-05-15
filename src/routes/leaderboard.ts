@@ -5,10 +5,19 @@ import { eq, desc, and, count as drizzleCount, avg } from 'drizzle-orm';
 
 const router = new Hono();
 
+const leaderboardCache = new Map<string, { data: unknown[]; ts: number }>();
+const CACHE_TTL = 60_000;
+
 // GET /leaderboard?district=xxx&limit=20
 router.get('/', async (c) => {
   const district = c.req.query('district');
   const limit = Math.min(Number(c.req.query('limit') ?? 20), 50);
+
+  const cacheKey = `${district ?? ''}-${limit}`;
+  const cached = leaderboardCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < CACHE_TTL) {
+    return c.json({ data: cached.data });
+  }
 
   const rows = await db
     .select({
@@ -31,18 +40,18 @@ router.get('/', async (c) => {
     .orderBy(desc(drizzleCount(orders.id)))
     .limit(limit);
 
-  return c.json({
-    data: rows.map((r, i) => ({
-      rank: i + 1,
-      id: r.id,
-      name: r.name,
-      district: r.district,
-      level: r.level,
-      xp: r.xp,
-      ordersCompleted: Number(r.ordersCompleted),
-      avgRating: r.avgRating ? Number(Number(r.avgRating).toFixed(1)) : null,
-    })),
-  });
+  const data = rows.map((r, i) => ({
+    rank: i + 1,
+    id: r.id,
+    name: r.name,
+    district: r.district,
+    level: r.level,
+    xp: r.xp,
+    ordersCompleted: Number(r.ordersCompleted),
+    avgRating: r.avgRating ? Number(Number(r.avgRating).toFixed(1)) : null,
+  }));
+  leaderboardCache.set(cacheKey, { data, ts: Date.now() });
+  return c.json({ data });
 });
 
 export default router;

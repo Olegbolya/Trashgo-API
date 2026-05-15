@@ -42,7 +42,8 @@ referralsRouter.get('/my', async (c) => {
     .select({ name: users.name, role: users.role, joinedAt: users.createdAt })
     .from(referrals)
     .innerJoin(users, eq(users.id, referrals.refereeId))
-    .where(whereClause);
+    .where(whereClause)
+    .limit(100);
 
   const baseLink = `${FRONTEND_URL}/ref/${user.referralCode}`;
   const link = target === 'contractor'

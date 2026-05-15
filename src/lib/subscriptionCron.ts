@@ -86,9 +86,9 @@ export async function runSubscriptionCron() {
               address: sub.address,
               scheduledDate: scheduledAt.toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long' }),
               price: sub.price,
-            }).catch(() => {});
+            }).catch((e: any) => console.error('[SubscriptionCron] Email error:', e?.message));
           }
-        }).catch(() => {});
+        }).catch((e: any) => console.error('[SubscriptionCron] Email fetch error:', e?.message));
 
       created++;
       console.log(`[SubscriptionCron] Created order ${newOrder.id} for sub ${sub.id}`);
