@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { db } from '../db/index.js';
 import { orders, users } from '../db/schema.js';
-import { eq, desc, and, count as drizzleCount, avg } from 'drizzle-orm';
+import { eq, desc, and, count as drizzleCount, avg, sql } from 'drizzle-orm';
 
 const router = new Hono();
 
@@ -19,6 +19,7 @@ router.get('/', async (c) => {
     return c.json({ data: cached.data });
   }
 
+  // LEFT JOIN so contractors with 0 completed orders still appear
   const rows = await db
     .select({
       id: users.id,
@@ -29,15 +30,15 @@ router.get('/', async (c) => {
       ordersCompleted: drizzleCount(orders.id),
       avgRating: avg(orders.ratingByCustomer),
     })
-    .from(orders)
-    .innerJoin(users, eq(users.id, orders.contractorId))
+    .from(users)
+    .leftJoin(orders, and(eq(orders.contractorId, users.id), eq(orders.status, 'completed')))
     .where(
       district
-        ? and(eq(orders.status, 'completed'), eq(users.district, district))
-        : eq(orders.status, 'completed')
+        ? and(eq(users.role, 'contractor'), eq(users.district, district))
+        : eq(users.role, 'contractor')
     )
     .groupBy(users.id, users.name, users.district, users.level, users.xp)
-    .orderBy(desc(drizzleCount(orders.id)))
+    .orderBy(desc(drizzleCount(orders.id)), desc(users.xp))
     .limit(limit);
 
   const data = rows.map((r, i) => ({

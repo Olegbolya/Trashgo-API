@@ -1,3 +1,5 @@
+import { normalizePhone } from './phone.js';
+
 const SMS_RU_API_ID = process.env.SMS_RU_API_ID;
 const SMSGATEWAY_LOGIN = process.env.SMSGATEWAY_LOGIN;
 const SMSGATEWAY_PASSWORD = process.env.SMSGATEWAY_PASSWORD;
@@ -11,13 +13,6 @@ export const hasSms = () => !!(
   SMSGATEWAY_LOGIN && SMSGATEWAY_PASSWORD && SMSGATEWAY_DEVICE_ID
 );
 
-function normalizePhone(phone: string): string {
-  const digits = phone.replace(/\D/g, '');
-  if (digits.startsWith('7')) return digits;
-  if (digits.startsWith('8')) return '7' + digits.slice(1);
-  return '7' + digits;
-}
-
 // HttpSMS.com — free 200 SMS/month, your Android phone sends via Russian SIM
 async function sendViaHttpSms(phone: string, code: string): Promise<boolean> {
   const res = await fetch('https://api.httpsms.com/v1/messages/send', {
@@ -25,7 +20,7 @@ async function sendViaHttpSms(phone: string, code: string): Promise<boolean> {
     headers: { 'Content-Type': 'application/json', 'x-api-key': HTTPSMS_API_KEY! },
     body: JSON.stringify({
       from: HTTPSMS_SENDER!,
-      to: '+' + normalizePhone(phone),
+      to: normalizePhone(phone),
       content: `TrashGo: код ${code}. Никому не сообщайте.`,
     }),
   });
@@ -41,7 +36,7 @@ async function sendViaSmsGateway(phone: string, code: string): Promise<boolean> 
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${credentials}` },
     body: JSON.stringify({
-      phone_number: '+' + normalizePhone(phone),
+      phone_number: normalizePhone(phone),
       message: `TrashGo: код ${code}. Никому не сообщайте.`,
       device_id: Number(SMSGATEWAY_DEVICE_ID),
     }),
@@ -55,7 +50,8 @@ async function sendViaSmsGateway(phone: string, code: string): Promise<boolean> 
 async function sendViaSmsRu(phone: string, code: string): Promise<boolean> {
   const url = new URL('https://sms.ru/sms/send');
   url.searchParams.set('api_id', SMS_RU_API_ID!);
-  url.searchParams.set('to', normalizePhone(phone));
+  // SMS.ru accepts +7XXXXXXXXXX without the leading +
+  url.searchParams.set('to', normalizePhone(phone).replace('+', ''));
   url.searchParams.set('msg', `TrashGo: ваш код подтверждения ${code}. Не сообщайте его никому.`);
   url.searchParams.set('json', '1');
   const res = await fetch(url.toString());

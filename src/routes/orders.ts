@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { eq, desc, sql, asc, and, ne, inArray, like, lt, isNotNull, avg, count } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { db } from '../db/index.js';
 import { orders, orderHistory, users, messages, referrals } from '../db/schema.js';
 import { authMiddleware, type JwtPayload } from '../middleware/auth.js';
@@ -63,37 +64,36 @@ ordersRouter.get('/', async (c) => {
   const limit = Math.min(50, Math.max(1, parseInt(c.req.query('limit') ?? '20', 10) || 20));
   const offset = Math.max(0, parseInt(c.req.query('offset') ?? '0', 10) || 0);
 
-  const field = mode === 'contractor' ? orders.contractorId : orders.customerId;
+  const cu = alias(users, 'cu'); // counterpart user alias
 
-  // Fetch limit+1 to detect hasMore without a COUNT query
-  const result = await db.select()
-    .from(orders)
-    .where(eq(field, user.userId))
-    .orderBy(desc(orders.createdAt))
-    .limit(limit + 1)
-    .offset(offset);
+  // Single LEFT JOIN fetches order + counterpart name in one query
+  const result = mode === 'contractor'
+    ? await db
+        .select({ order: orders, counterpartName: cu.name })
+        .from(orders)
+        .leftJoin(cu, eq(cu.id, orders.customerId))
+        .where(eq(orders.contractorId, user.userId))
+        .orderBy(desc(orders.createdAt))
+        .limit(limit + 1)
+        .offset(offset)
+    : await db
+        .select({ order: orders, counterpartName: cu.name })
+        .from(orders)
+        .leftJoin(cu, eq(cu.id, orders.contractorId))
+        .where(eq(orders.customerId, user.userId))
+        .orderBy(desc(orders.createdAt))
+        .limit(limit + 1)
+        .offset(offset);
 
   const hasMore = result.length > limit;
   const page = hasMore ? result.slice(0, limit) : result;
 
-  // Fetch counterpart names for history display
-  const counterpartIds = [...new Set(
-    page.map(o => mode === 'contractor' ? o.customerId : o.contractorId).filter(Boolean) as string[]
-  )];
-  const counterparts: Record<string, string> = {};
-  if (counterpartIds.length > 0) {
-    const names = await db.select({ id: users.id, name: users.name })
-      .from(users)
-      .where(inArray(users.id, counterpartIds));
-    names.forEach(u => { counterparts[u.id] = u.name; });
-  }
-
   return c.json({
-    data: page.map(o => ({
+    data: page.map(({ order: o, counterpartName }) => ({
       ...formatOrder(o),
       ...(mode === 'contractor'
-        ? { customerName: counterparts[o.customerId] ?? '' }
-        : { contractorName: o.contractorId ? (counterparts[o.contractorId] ?? '') : '' }
+        ? { customerName: counterpartName ?? '' }
+        : { contractorName: counterpartName ?? '' }
       ),
     })),
     meta: { hasMore, nextOffset: hasMore ? offset + limit : null },

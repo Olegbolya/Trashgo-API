@@ -26,6 +26,7 @@ import { addClient, connectedCount, emitToUser, setFcmFallback } from './ws.js';
 import { sendPushNotification } from './lib/firebase-admin.js';
 import { startSubscriptionCron } from './lib/subscriptionCron.js';
 import { hasTelegram, sendTelegramNotification, getBotUsername } from './lib/telegram.js';
+import { normalizePhone } from './lib/phone.js';
 
 const app = new Hono();
 
@@ -173,8 +174,8 @@ app.post('/api/v1/auth/telegram/webhook', async (c) => {
   }
 
   // Normalize phone
-  const digits = phone.replace(/\D/g, '');
-  const normalized = digits.startsWith('7') ? `+${digits}` : digits.startsWith('8') ? `+7${digits.slice(1)}` : `+7${digits}`;
+  const normalized = normalizePhone(phone);
+  const digits = normalized.replace('+', '');
   const phoneForms = [normalized, digits, phone, `+${digits}`, `8${digits.slice(1)}`];
 
   const { users: usersTable, otpCodes: otpCodesTable } = await import('./db/schema.js');
