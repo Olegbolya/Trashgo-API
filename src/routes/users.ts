@@ -21,6 +21,7 @@ const updateProfileSchema = z.object({
   notifEmailAddress: z.string().email().max(200).optional().nullable(),
   fcmToken: z.string().max(300).optional().nullable(),
   isAvailable: z.boolean().optional(),
+  inn: z.string().regex(/^\d{12}$/).optional().nullable(),
 });
 
 // GET /users/me
@@ -70,6 +71,7 @@ usersRouter.get('/me', async (c) => {
       notifEmailAddress: u.notifEmailAddress ?? null,
       telegramLinked: !!u.telegramChatId,
       isAvailable: u.isAvailable ?? true,
+      inn: u.inn ?? null,
       createdAt: u.createdAt.toISOString(),
     },
   });
@@ -85,11 +87,12 @@ usersRouter.patch('/me', async (c) => {
     return c.json({ error: { code: 'VALIDATION', message: 'Invalid input' } }, 400);
   }
 
-  const { addresses, notifEmailAddress, fcmToken, ...rest } = parsed.data;
+  const { addresses, notifEmailAddress, fcmToken, inn, ...rest } = parsed.data;
   const dbSet: Record<string, unknown> = { ...rest };
   if (addresses !== undefined) dbSet.addresses = JSON.stringify(addresses);
   if (notifEmailAddress !== undefined) dbSet.notifEmailAddress = notifEmailAddress;
   if (fcmToken !== undefined) dbSet.fcmToken = fcmToken;
+  if (inn !== undefined) dbSet.inn = inn;
 
   const updated = await db.update(users)
     .set(dbSet as any)
@@ -120,6 +123,7 @@ usersRouter.patch('/me', async (c) => {
       notifEmail: u.notifEmail ?? false,
       notifEmailAddress: u.notifEmailAddress ?? null,
       isAvailable: u.isAvailable ?? true,
+      inn: u.inn ?? null,
       createdAt: u.createdAt.toISOString(),
     },
   });
