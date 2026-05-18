@@ -3,6 +3,7 @@ import { eq, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { supportMessages, users } from '../db/schema.js';
 import { authMiddleware, type JwtPayload } from '../middleware/auth.js';
+import { sendTelegramNotification } from '../lib/telegram.js';
 
 const supportRouter = new Hono<{ Variables: { user: JwtPayload } }>();
 supportRouter.use('*', authMiddleware);
@@ -14,9 +15,17 @@ supportRouter.post('/', async (c) => {
   const message = ((body as any)?.message ?? '').toString().trim().slice(0, 2000);
   if (!message) return c.json({ error: { code: 'VALIDATION', message: 'Message required' } }, 400);
 
-  const [row] = await db.insert(supportMessages)
-    .values({ userId, message })
-    .returning();
+  const [[row], [sender]] = await Promise.all([
+    db.insert(supportMessages).values({ userId, message }).returning(),
+    db.select({ name: users.name, phone: users.phone }).from(users).where(eq(users.id, userId)).limit(1),
+  ]);
+
+  // Notify admin via Telegram
+  const adminChatId = process.env.ADMIN_TELEGRAM_CHAT_ID;
+  if (adminChatId) {
+    const who = sender?.name || sender?.phone || userId.slice(-8);
+    sendTelegramNotification(adminChatId, `💬 Обращение в поддержку от ${who}`, message).catch(() => {});
+  }
 
   return c.json({ data: { id: row.id, message: row.message, createdAt: row.createdAt.toISOString(), status: row.status, reply: null } }, 201);
 });
