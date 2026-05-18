@@ -139,6 +139,8 @@ export const supportMessages = pgTable('support_messages', {
   status: varchar('status', { length: 20 }).notNull().default('open'), // open | closed
   readAt: timestamp('read_at'),
   category: varchar('category', { length: 50 }),
+  isBotReply: boolean('is_bot_reply').notNull().default(false),
+  escalated: boolean('escalated').notNull().default(false),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 }, (table) => [
   index('idx_support_user').on(table.userId, table.createdAt),

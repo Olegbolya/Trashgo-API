@@ -180,7 +180,7 @@ adminRouter.post('/disputes/:id/close', async (c) => {
   return c.json({ data: { ok: true } });
 });
 
-// GET /admin/support?status=open — list support messages
+// GET /admin/support?status=open|escalated|all — list support messages
 adminRouter.get('/support', async (c) => {
   if (!checkAdmin(c)) return forbidden(c);
   const status = c.req.query('status') ?? 'open';
@@ -197,19 +197,28 @@ adminRouter.get('/support', async (c) => {
     telegramChatId: users.telegramChatId,
     readAt: supportMessages.readAt,
     category: supportMessages.category,
+    isBotReply: supportMessages.isBotReply,
+    escalated: supportMessages.escalated,
   }).from(supportMessages)
     .leftJoin(users, eq(supportMessages.userId, users.id))
-    .where(status === 'all' ? sql`true` : eq(supportMessages.status, status))
+    .where(
+      status === 'all' ? sql`true` :
+      status === 'escalated' ? eq(supportMessages.escalated, true) :
+      eq(supportMessages.status, status)
+    )
     .orderBy(desc(supportMessages.createdAt))
     .limit(100);
   return c.json({ data: rows.map(r => ({ ...r, repliedAt: r.repliedAt?.toISOString() ?? null, createdAt: r.createdAt.toISOString(), readAt: r.readAt?.toISOString() ?? null, category: r.category ?? null })) });
 });
 
-// GET /admin/support/count — count of open support messages for stats badge
+// GET /admin/support/count — count open + escalated support messages
 adminRouter.get('/support/count', async (c) => {
   if (!checkAdmin(c)) return forbidden(c);
-  const [row] = await db.select({ cnt: count() }).from(supportMessages).where(eq(supportMessages.status, 'open'));
-  return c.json({ data: { open: Number(row?.cnt ?? 0) } });
+  const [[openRow], [escalatedRow]] = await Promise.all([
+    db.select({ cnt: count() }).from(supportMessages).where(eq(supportMessages.status, 'open')),
+    db.select({ cnt: count() }).from(supportMessages).where(eq(supportMessages.escalated, true)),
+  ]);
+  return c.json({ data: { open: Number(openRow?.cnt ?? 0), escalated: Number(escalatedRow?.cnt ?? 0) } });
 });
 
 // POST /admin/support/:id/reply — admin replies to a support message

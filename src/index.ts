@@ -292,6 +292,8 @@ async function runMigrations() {
     await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_support_user ON support_messages(user_id, created_at)`);
     await db.execute(sql`ALTER TABLE support_messages ADD COLUMN IF NOT EXISTS read_at TIMESTAMP`);
     await db.execute(sql`ALTER TABLE support_messages ADD COLUMN IF NOT EXISTS category VARCHAR(50)`);
+    await db.execute(sql`ALTER TABLE support_messages ADD COLUMN IF NOT EXISTS is_bot_reply BOOLEAN NOT NULL DEFAULT FALSE`);
+    await db.execute(sql`ALTER TABLE support_messages ADD COLUMN IF NOT EXISTS escalated BOOLEAN NOT NULL DEFAULT FALSE`);
     console.log('✓ DB schema up to date');
   } catch (e: any) {
     console.warn('Migration warning:', e.message);
