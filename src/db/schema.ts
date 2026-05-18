@@ -129,6 +129,19 @@ export const userAchievements = pgTable('user_achievements', {
   index('idx_user_achievements_user').on(table.userId),
 ]);
 
+// Support messages (user → admin chat)
+export const supportMessages = pgTable('support_messages', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  message: text('message').notNull(),
+  reply: text('reply'),
+  repliedAt: timestamp('replied_at'),
+  status: varchar('status', { length: 20 }).notNull().default('open'), // open | closed
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (table) => [
+  index('idx_support_user').on(table.userId, table.createdAt),
+]);
+
 // Refresh tokens
 export const refreshTokens = pgTable('refresh_tokens', {
   id: uuid('id').primaryKey().defaultRandom(),

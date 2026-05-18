@@ -18,6 +18,7 @@ import achievementsRoutes from './routes/achievements.js';
 import subscriptionsRoutes from './routes/subscriptions.js';
 import leaderboardRoutes from './routes/leaderboard.js';
 import adminRoutes from './routes/admin.js';
+import supportRoutes from './routes/support.js';
 import { db } from './db/index.js';
 import { calcLevel, checkOrderAchievements, checkVolumeAchievements, checkDistrictAchievements, checkTimeAchievements, checkAsapAchievements, checkEcoAchievements, checkVehicleAchievements, checkTenureAchievements } from './lib/achievements.js';
 import { sql, and, eq, lt } from 'drizzle-orm';
@@ -97,6 +98,7 @@ app.route('/api/v1/achievements', achievementsRoutes);
 app.route('/api/v1/subscriptions', subscriptionsRoutes);
 app.route('/api/v1/leaderboard', leaderboardRoutes);
 app.route('/api/v1/admin', adminRoutes);
+app.route('/api/v1/support', supportRoutes);
 
 // Geocoding proxy — avoids Nominatim browser User-Agent restrictions
 // ?q=... &limit=N (default 1, max 5)
@@ -286,6 +288,8 @@ async function runMigrations() {
     await db.execute(sql`ALTER TABLE orders ADD COLUMN IF NOT EXISTS subscription_id UUID REFERENCES subscriptions(id)`);
     await db.execute(sql`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel = 'pending_payment' AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'order_status')) THEN ALTER TYPE order_status ADD VALUE 'pending_payment'; END IF; END $$`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_available BOOLEAN NOT NULL DEFAULT TRUE`);
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS support_messages (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID NOT NULL REFERENCES users(id), message TEXT NOT NULL, reply TEXT, replied_at TIMESTAMP, status VARCHAR(20) NOT NULL DEFAULT 'open', created_at TIMESTAMP NOT NULL DEFAULT NOW())`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_support_user ON support_messages(user_id, created_at)`);
     console.log('✓ DB schema up to date');
   } catch (e: any) {
     console.warn('Migration warning:', e.message);
