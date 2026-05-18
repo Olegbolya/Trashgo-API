@@ -290,6 +290,8 @@ async function runMigrations() {
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_available BOOLEAN NOT NULL DEFAULT TRUE`);
     await db.execute(sql`CREATE TABLE IF NOT EXISTS support_messages (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID NOT NULL REFERENCES users(id), message TEXT NOT NULL, reply TEXT, replied_at TIMESTAMP, status VARCHAR(20) NOT NULL DEFAULT 'open', created_at TIMESTAMP NOT NULL DEFAULT NOW())`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_support_user ON support_messages(user_id, created_at)`);
+    await db.execute(sql`ALTER TABLE support_messages ADD COLUMN IF NOT EXISTS read_at TIMESTAMP`);
+    await db.execute(sql`ALTER TABLE support_messages ADD COLUMN IF NOT EXISTS category VARCHAR(50)`);
     console.log('✓ DB schema up to date');
   } catch (e: any) {
     console.warn('Migration warning:', e.message);

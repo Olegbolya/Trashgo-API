@@ -195,12 +195,14 @@ adminRouter.get('/support', async (c) => {
     userName: users.name,
     userPhone: users.phone,
     telegramChatId: users.telegramChatId,
+    readAt: supportMessages.readAt,
+    category: supportMessages.category,
   }).from(supportMessages)
     .leftJoin(users, eq(supportMessages.userId, users.id))
     .where(status === 'all' ? sql`true` : eq(supportMessages.status, status))
     .orderBy(desc(supportMessages.createdAt))
     .limit(100);
-  return c.json({ data: rows.map(r => ({ ...r, repliedAt: r.repliedAt?.toISOString() ?? null, createdAt: r.createdAt.toISOString() })) });
+  return c.json({ data: rows.map(r => ({ ...r, repliedAt: r.repliedAt?.toISOString() ?? null, createdAt: r.createdAt.toISOString(), readAt: r.readAt?.toISOString() ?? null, category: r.category ?? null })) });
 });
 
 // GET /admin/support/count — count of open support messages for stats badge
