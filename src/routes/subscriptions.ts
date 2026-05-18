@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { subscriptions } from '../db/schema.js';
+import { subscriptions, users } from '../db/schema.js';
 import { authMiddleware, type JwtPayload } from '../middleware/auth.js';
 
 const router = new Hono<{ Variables: { user: JwtPayload } }>();
@@ -19,19 +19,28 @@ const SubSchema = z.object({
   volume: z.number().int().min(1).max(30).default(1),
   price: z.number().int().min(1),
   description: z.string().max(500).default(''),
+  contractorId: z.string().uuid().optional().nullable(),
 });
+
+function formatSub(r: typeof subscriptions.$inferSelect, contractorName?: string | null) {
+  let days: number[] = [];
+  try { days = JSON.parse(r.days); } catch { days = []; }
+  return {
+    ...r,
+    days,
+    contractorName: contractorName ?? null,
+  };
+}
 
 // GET /subscriptions — list my subscriptions (customer)
 router.get('/', async (c) => {
   const { userId } = c.get('user');
-  const rows = await db.select().from(subscriptions).where(eq(subscriptions.customerId, userId));
-  return c.json({
-    data: rows.map(r => {
-      let days: number[] = [];
-      try { days = JSON.parse(r.days); } catch { days = []; }
-      return { ...r, days };
-    }),
-  });
+  const rows = await db
+    .select({ sub: subscriptions, contractorName: users.name })
+    .from(subscriptions)
+    .leftJoin(users, eq(users.id, subscriptions.contractorId))
+    .where(eq(subscriptions.customerId, userId));
+  return c.json({ data: rows.map(({ sub, contractorName }) => formatSub(sub, contractorName)) });
 });
 
 // POST /subscriptions
@@ -40,18 +49,23 @@ router.post('/', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const parsed = SubSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: { code: 'VALIDATION', message: parsed.error.message } }, 400);
-  const { days, ...rest } = parsed.data;
+  const { days, contractorId, ...rest } = parsed.data;
   const [sub] = await db.insert(subscriptions).values({
     customerId: userId,
     ...rest,
+    ...(contractorId ? { contractorId } : {}),
     days: JSON.stringify(days),
   }).returning();
-  let createdDays: number[] = [];
-  try { createdDays = JSON.parse(sub.days); } catch { createdDays = []; }
-  return c.json({ data: { ...sub, days: createdDays } }, 201);
+
+  let contractorName: string | null = null;
+  if (sub.contractorId) {
+    const [ct] = await db.select({ name: users.name }).from(users).where(eq(users.id, sub.contractorId)).limit(1);
+    contractorName = ct?.name ?? null;
+  }
+  return c.json({ data: formatSub(sub, contractorName) }, 201);
 });
 
-// PATCH /subscriptions/:id — update (pause/resume/reschedule)
+// PATCH /subscriptions/:id — update (pause/resume/reschedule/reassign contractor)
 router.patch('/:id', async (c) => {
   const { userId } = c.get('user');
   const { id } = c.req.param();
@@ -59,7 +73,7 @@ router.patch('/:id', async (c) => {
   const UpdateSchema = SubSchema.partial().extend({ active: z.boolean().optional() });
   const parsed = UpdateSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: { code: 'VALIDATION', message: parsed.error.message } }, 400);
-  const { days, ...rest } = parsed.data;
+  const { days, contractorId, ...rest } = parsed.data;
   const setData: Partial<typeof subscriptions.$inferInsert> = {};
   if (rest.address !== undefined) setData.address = rest.address;
   if (rest.district !== undefined) setData.district = rest.district;
@@ -69,14 +83,19 @@ router.patch('/:id', async (c) => {
   if (rest.description !== undefined) setData.description = rest.description;
   if (rest.active !== undefined) setData.active = rest.active;
   if (days !== undefined) setData.days = JSON.stringify(days);
+  if (contractorId !== undefined) setData.contractorId = contractorId ?? undefined;
   const [sub] = await db.update(subscriptions)
     .set(setData)
     .where(and(eq(subscriptions.id, id), eq(subscriptions.customerId, userId)))
     .returning();
   if (!sub) return c.json({ error: { code: 'NOT_FOUND' } }, 404);
-  let parsedDays: number[] = [];
-  try { parsedDays = JSON.parse(sub.days); } catch { parsedDays = []; }
-  return c.json({ data: { ...sub, days: parsedDays } });
+
+  let contractorName: string | null = null;
+  if (sub.contractorId) {
+    const [ct] = await db.select({ name: users.name }).from(users).where(eq(users.id, sub.contractorId)).limit(1);
+    contractorName = ct?.name ?? null;
+  }
+  return c.json({ data: formatSub(sub, contractorName) });
 });
 
 // DELETE /subscriptions/:id

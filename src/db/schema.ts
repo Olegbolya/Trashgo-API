@@ -47,6 +47,7 @@ export const otpCodes = pgTable('otp_codes', {
 export const subscriptions = pgTable('subscriptions', {
   id: uuid('id').primaryKey().defaultRandom(),
   customerId: uuid('customer_id').notNull().references(() => users.id),
+  contractorId: uuid('contractor_id').references(() => users.id),
   address: text('address').notNull(),
   district: varchar('district', { length: 100 }).notNull().default(''),
   days: text('days').notNull().default('[]'),  // JSON array of weekday numbers [1..7], 1=Mon

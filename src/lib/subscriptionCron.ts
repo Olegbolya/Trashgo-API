@@ -57,6 +57,7 @@ export async function runSubscriptionCron() {
     const scheduledAt = new Date(`${dateStr}T${sub.time}:00+03:00`);
 
     try {
+      const hasContractor = !!sub.contractorId;
       const [newOrder] = await db.insert(orders).values({
         customerId: sub.customerId,
         subscriptionId: sub.id,
@@ -67,13 +68,16 @@ export async function runSubscriptionCron() {
         description: sub.description || 'Создан автоматически по подписке',
         asap: false,
         scheduledAt,
-        status: 'new',
+        status: hasContractor ? 'accepted' : 'new',
+        ...(hasContractor ? { contractorId: sub.contractorId! } : {}),
       }).returning({ id: orders.id });
 
       emitToUser(sub.customerId, {
         type: 'subscription_order_created',
         title: '📅 Заказ по подписке создан',
-        message: `Заказ на ${dateStr} по адресу ${sub.address} выставлен исполнителям`,
+        message: hasContractor
+          ? `Заказ на ${dateStr} назначен вашему исполнителю`
+          : `Заказ на ${dateStr} по адресу ${sub.address} выставлен исполнителям`,
         orderId: newOrder.id,
       });
 

@@ -19,6 +19,7 @@ import subscriptionsRoutes from './routes/subscriptions.js';
 import leaderboardRoutes from './routes/leaderboard.js';
 import adminRoutes from './routes/admin.js';
 import supportRoutes from './routes/support.js';
+import uploadRoutes from './routes/upload.js';
 import { db } from './db/index.js';
 import { calcLevel, checkOrderAchievements, checkVolumeAchievements, checkDistrictAchievements, checkTimeAchievements, checkAsapAchievements, checkEcoAchievements, checkVehicleAchievements, checkTenureAchievements } from './lib/achievements.js';
 import { sql, and, eq, lt } from 'drizzle-orm';
@@ -99,6 +100,7 @@ app.route('/api/v1/subscriptions', subscriptionsRoutes);
 app.route('/api/v1/leaderboard', leaderboardRoutes);
 app.route('/api/v1/admin', adminRoutes);
 app.route('/api/v1/support', supportRoutes);
+app.route('/api/v1/upload', uploadRoutes);
 
 // Geocoding proxy — avoids Nominatim browser User-Agent restrictions
 // ?q=... &limit=N (default 1, max 5)
@@ -294,6 +296,7 @@ async function runMigrations() {
     await db.execute(sql`ALTER TABLE support_messages ADD COLUMN IF NOT EXISTS category VARCHAR(50)`);
     await db.execute(sql`ALTER TABLE support_messages ADD COLUMN IF NOT EXISTS is_bot_reply BOOLEAN NOT NULL DEFAULT FALSE`);
     await db.execute(sql`ALTER TABLE support_messages ADD COLUMN IF NOT EXISTS escalated BOOLEAN NOT NULL DEFAULT FALSE`);
+    await db.execute(sql`ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS contractor_id UUID REFERENCES users(id)`);
     console.log('✓ DB schema up to date');
   } catch (e: any) {
     console.warn('Migration warning:', e.message);

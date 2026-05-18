@@ -17,6 +17,7 @@ async function getAdmin() {
           clientEmail: FIREBASE_CLIENT_EMAIL,
           privateKey: FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
         }),
+        storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
       });
       console.log('✓ Firebase Admin initialized');
     }
@@ -29,6 +30,34 @@ async function getAdmin() {
 }
 
 export const isFirebaseAdminReady = () => !!process.env.FIREBASE_PROJECT_ID;
+export const isStorageConfigured = () => !!process.env.FIREBASE_STORAGE_BUCKET && !!process.env.FIREBASE_PROJECT_ID;
+
+/**
+ * Uploads a base64-encoded file to Firebase Storage and returns its public URL.
+ * Returns null if storage is not configured or on error.
+ */
+export async function uploadBase64ToStorage(
+  base64: string,
+  mimeType: string,
+  folder: string,
+): Promise<string | null> {
+  const admin = await getAdmin();
+  if (!admin || !process.env.FIREBASE_STORAGE_BUCKET) return null;
+  try {
+    const { nanoid } = await import('nanoid');
+    const ext = mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg';
+    const filename = `${folder}/${nanoid(16)}.${ext}`;
+    const bucket = admin.storage().bucket();
+    const file = bucket.file(filename);
+    const buffer = Buffer.from(base64, 'base64');
+    await file.save(buffer, { metadata: { contentType: mimeType } });
+    await file.makePublic();
+    return `https://storage.googleapis.com/${process.env.FIREBASE_STORAGE_BUCKET}/${filename}`;
+  } catch (e: any) {
+    console.error('[Storage] Upload failed:', e.message);
+    return null;
+  }
+}
 
 export async function verifyFirebaseIdToken(idToken: string): Promise<string | null> {
   const admin = await getAdmin();
