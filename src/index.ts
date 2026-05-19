@@ -167,7 +167,7 @@ app.post('/api/v1/auth/telegram/webhook', async (c) => {
     const { sendTelegramOtp } = await import('./lib/telegram.js');
     await sendTelegramOtp(chatId, tokenEntry.code);
     if (isNewLink) {
-      await sendTelegramMessage(chatId, '✅ Telegram привязан к вашему аккаунту TrashGo.\n\nТеперь вы будете получать уведомления о заказах прямо сюда — даже когда приложение закрыто.');
+      await sendTelegramMessage(chatId, '🗑 *TrashGo* — вынос мусора в Казани\n\n✅ Telegram успешно привязан к вашему аккаунту\\!\n\nТеперь уведомления о заказах, коды подтверждения и важные сообщения будут приходить прямо сюда — даже когда приложение закрыто\\.\n\n🌐 Приложение: https://trashgo\\-gamma\\.vercel\\.app', true);
     }
     return c.json({ ok: true });
   }
@@ -216,19 +216,19 @@ app.post('/api/v1/auth/telegram/webhook', async (c) => {
   if (otp) {
     await sendTelegramOtp(chatId, otp.code);
   } else {
-    await sendTelegramMessage(chatId, `✅ Telegram привязан к номеру ${normalized}.\n\nТеперь запросите код в приложении TrashGo, и он придёт сюда.`);
+    await sendTelegramMessage(chatId, `🗑 *TrashGo* — вынос мусора в Казани\n\n✅ Telegram привязан к номеру ${normalized}\\.\n\nТеперь запросите код в приложении и он придёт сюда\\.\n\n🌐 Приложение: https://trashgo\\-gamma\\.vercel\\.app`, true);
   }
 
   return c.json({ ok: true });
 });
 
-async function sendTelegramMessage(chatId: string, text: string) {
+async function sendTelegramMessage(chatId: string, text: string, markdownV2 = false) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return;
   await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text }),
+    body: JSON.stringify({ chat_id: chatId, text, ...(markdownV2 ? { parse_mode: 'MarkdownV2' } : {}) }),
   }).catch(() => {});
 }
 

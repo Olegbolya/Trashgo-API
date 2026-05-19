@@ -73,6 +73,8 @@ usersRouter.get('/me', async (c) => {
       isAvailable: u.isAvailable ?? true,
       inn: u.inn ?? null,
       innVerified: u.innVerified ?? false,
+      frozen: u.frozen ?? false,
+      freezeReason: u.freezeReason ?? null,
       createdAt: u.createdAt.toISOString(),
     },
   });
@@ -274,6 +276,24 @@ usersRouter.get('/my-contractors', async (c) => {
     avgRating: r.avgRating ? Number(Number(r.avgRating).toFixed(1)) : null,
     ordersCompleted: Number(r.ordersCompleted),
   })) });
+});
+
+// POST /users/appeal-freeze — submit an appeal for account unfreeze
+usersRouter.post('/appeal-freeze', async (c) => {
+  const { userId } = c.get('user');
+  const body = await c.req.json().catch(() => ({}));
+  const reason = ((body as any)?.reason ?? '').toString().trim().slice(0, 500);
+  if (!reason) return c.json({ error: { code: 'VALIDATION', message: 'Reason required' } }, 400);
+
+  const row = await db.select({ id: users.id, frozen: users.frozen }).from(users).where(eq(users.id, userId)).limit(1);
+  if (!row[0]?.frozen) return c.json({ error: { code: 'NOT_FROZEN', message: 'Account is not frozen' } }, 400);
+
+  // Store appeal in freeze reason as suffix (simple approach without extra table)
+  await db.update(users)
+    .set({ freezeReason: `[Оспорено]: ${reason}` } as any)
+    .where(eq(users.id, userId));
+
+  return c.json({ data: { ok: true } });
 });
 
 // POST /users/verify-inn — check self-employment status via FNS API

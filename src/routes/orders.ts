@@ -435,6 +435,11 @@ ordersRouter.patch('/:id/status', async (c) => {
     }
   }
 
+  // Customer cannot cancel once contractor has picked up (in_progress)
+  if (status === 'cancelled' && order.status === 'in_progress' && order.customerId === user.userId) {
+    return c.json({ error: { code: 'ALREADY_PICKED_UP', message: 'Нельзя отменить — исполнитель уже забрал мусор' } }, 400);
+  }
+
   // Customer can only cancel an accepted order within 10 minutes of acceptance
   if (status === 'cancelled' && order.status === 'accepted' && order.customerId === user.userId) {
     const [hist] = await db.select({ createdAt: orderHistory.createdAt })
@@ -449,12 +454,20 @@ ordersRouter.patch('/:id/status', async (c) => {
     }
   }
 
+  // Contractor cancelling an accepted order → revert to 'new' so another contractor can take it
+  const effectiveStatus = (status === 'cancelled' && order.status === 'accepted' && user.userId === order.contractorId)
+    ? 'new'
+    : status;
+
   const updates: Record<string, unknown> = {
-    status,
+    status: effectiveStatus,
     updatedAt: new Date(),
   };
   if (status === 'accepted') {
     updates.contractorId = user.userId;
+  }
+  if (effectiveStatus === 'new' && status === 'cancelled') {
+    updates.contractorId = null;
   }
 
   const updated = await db.update(orders)
@@ -468,8 +481,10 @@ ordersRouter.patch('/:id/status', async (c) => {
 
   await db.insert(orderHistory).values({
     orderId: id,
-    status,
-    note: `Status changed by user ${user.userId}`,
+    status: effectiveStatus,
+    note: effectiveStatus !== status
+      ? `Contractor released order (reverted to new) by user ${user.userId}`
+      : `Status changed by user ${user.userId}`,
   });
 
   // Real-time notifications via WebSocket
@@ -480,9 +495,10 @@ ordersRouter.patch('/:id/status', async (c) => {
     pending_confirmation: 'Ожидает вашего подтверждения',
     completed: 'Заказ выполнен',
     cancelled: 'Заказ отменён',
+    new: 'Исполнитель отказался от заказа',
   };
-  const label = statusLabels[status] || status;
-  const event = { type: 'order_status', orderId: id, status, title: label, message: `Заказ #${id.slice(0, 8)}` };
+  const label = statusLabels[effectiveStatus] || effectiveStatus;
+  const event = { type: 'order_status', orderId: id, status: effectiveStatus, title: label, message: `Заказ #${id.slice(0, 8)}` };
   if (updatedOrder.customerId) emitToUser(updatedOrder.customerId, event);
   if (updatedOrder.contractorId && updatedOrder.contractorId !== updatedOrder.customerId) {
     emitToUser(updatedOrder.contractorId, event);
@@ -491,13 +507,16 @@ ordersRouter.patch('/:id/status', async (c) => {
   // Push + Telegram notifications
   const shortId = id.slice(0, 8);
   const notifyBody = `Заказ #${shortId} · ${updatedOrder.address}`;
-  if (status === 'accepted' || status === 'in_progress' || status === 'pending_confirmation' || status === 'completed') {
+  if (effectiveStatus === 'accepted' || effectiveStatus === 'in_progress' || effectiveStatus === 'pending_confirmation' || effectiveStatus === 'completed') {
     // Notify customer about contractor actions
     if (updatedOrder.customerId) notifyUser(updatedOrder.customerId, label, notifyBody, id);
-  } else if (status === 'cancelled') {
+  } else if (effectiveStatus === 'cancelled') {
     const cancelledBy = order.customerId === user.userId ? 'customer' : 'contractor';
     const notifyId = cancelledBy === 'customer' ? updatedOrder.contractorId : updatedOrder.customerId;
     if (notifyId) notifyUser(notifyId, label, notifyBody, id);
+  } else if (effectiveStatus === 'new' && status === 'cancelled') {
+    // Contractor released order — notify customer their order is available again
+    if (updatedOrder.customerId) notifyUser(updatedOrder.customerId, 'Исполнитель отказался от заказа', `Заказ #${shortId} снова доступен для других исполнителей`, id);
   }
 
   // Email notifications (fire and forget)
@@ -518,7 +537,7 @@ ordersRouter.patch('/:id/status', async (c) => {
         }
       }).catch(() => {});
   }
-  if (status === 'cancelled') {
+  if (effectiveStatus === 'cancelled') {
     const cancelledBy = order.customerId === user.userId ? 'customer' : 'contractor';
     const notifyId = cancelledBy === 'customer' ? updatedOrder.contractorId : updatedOrder.customerId;
     if (notifyId) {
