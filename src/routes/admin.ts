@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
-import { eq, count, sum, like, desc, sql, or, ilike } from 'drizzle-orm';
+import { eq, count, sum, like, desc, sql, or, ilike, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { users, orders, orderHistory, supportMessages } from '../db/schema.js';
+import { users, orders, orderHistory, supportMessages, blockedAddresses, referrals, userAchievements, refreshTokens, otpCodes, messages, subscriptions } from '../db/schema.js';
 import { notifyUser } from '../lib/notify.js';
 
 const adminRouter = new Hono();
@@ -166,6 +166,47 @@ adminRouter.get('/users/:id/orders', async (c) => {
     .orderBy(desc(orders.createdAt))
     .limit(50);
   return c.json({ data: rows });
+});
+
+// DELETE /admin/users/:id — permanently delete a user account
+adminRouter.delete('/users/:id', async (c) => {
+  if (!checkAdmin(c)) return forbidden(c);
+  const id = c.req.param('id');
+
+  const [user] = await db.select({ id: users.id, phone: users.phone }).from(users).where(eq(users.id, id)).limit(1);
+  if (!user) return c.json({ error: { code: 'NOT_FOUND', message: 'User not found' } }, 404);
+
+  try {
+    // Nullify contractorId on orders where this user was contractor
+    await db.execute(sql`UPDATE orders SET contractor_id = NULL WHERE contractor_id = ${id}`);
+
+    // Delete order-related data for customer orders
+    const customerOrders = await db.select({ id: orders.id }).from(orders).where(eq(orders.customerId, id));
+    for (const o of customerOrders) {
+      await db.delete(messages).where(eq(messages.orderId, o.id));
+      await db.delete(orderHistory).where(eq(orderHistory.orderId, o.id));
+    }
+    await db.delete(orders).where(eq(orders.customerId, id));
+
+    // Delete subscriptions
+    await db.delete(subscriptions).where(eq(subscriptions.customerId, id));
+    await db.execute(sql`UPDATE subscriptions SET contractor_id = NULL WHERE contractor_id = ${id}`);
+
+    // Delete user-level records
+    await db.delete(blockedAddresses).where(eq(blockedAddresses.customerId, id));
+    await db.execute(sql`DELETE FROM blocked_addresses WHERE contractor_id = ${id}`);
+    await db.delete(userAchievements).where(eq(userAchievements.userId, id));
+    await db.delete(refreshTokens).where(eq(refreshTokens.userId, id));
+    await db.delete(supportMessages).where(eq(supportMessages.userId, id));
+    await db.execute(sql`DELETE FROM otp_codes WHERE phone = (SELECT phone FROM users WHERE id = ${id})`);
+    await db.execute(sql`DELETE FROM referrals WHERE referrer_id = ${id} OR referee_id = ${id}`);
+
+    await db.delete(users).where(eq(users.id, id));
+  } catch (e: any) {
+    return c.json({ error: { code: 'DELETE_FAILED', message: e.message } }, 500);
+  }
+
+  return c.json({ data: { ok: true } });
 });
 
 // POST /admin/disputes/:id/close — mark dispute as resolved

@@ -78,6 +78,7 @@ export const orders = pgTable('orders', {
   completionPhotoUrls: text('completion_photo_urls').notNull().default('[]'),
   scheduledAt: timestamp('scheduled_at'),
   asap: boolean('asap').notNull().default(false),
+  wasteType: varchar('waste_type', { length: 50 }).notNull().default('household'),
   ratingByCustomer: integer('rating_by_customer'),
   ratingByContractor: integer('rating_by_contractor'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
@@ -146,6 +147,19 @@ export const supportMessages = pgTable('support_messages', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
 }, (table) => [
   index('idx_support_user').on(table.userId, table.createdAt),
+]);
+
+// Blocked addresses (non-payment fraud prevention)
+export const blockedAddresses = pgTable('blocked_addresses', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  address: text('address').notNull(),
+  customerId: uuid('customer_id').notNull().references(() => users.id),
+  contractorId: uuid('contractor_id').notNull().references(() => users.id),
+  orderId: uuid('order_id').references(() => orders.id),
+  reason: text('reason').notNull().default(''),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (table) => [
+  index('idx_blocked_addresses_customer').on(table.customerId),
 ]);
 
 // Refresh tokens

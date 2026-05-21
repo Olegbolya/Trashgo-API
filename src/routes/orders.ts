@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { eq, desc, sql, asc, and, ne, inArray, like, lt, isNotNull, avg, count } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { db } from '../db/index.js';
-import { orders, orderHistory, users, messages, referrals } from '../db/schema.js';
+import { orders, orderHistory, users, messages, referrals, blockedAddresses } from '../db/schema.js';
 import { authMiddleware, type JwtPayload } from '../middleware/auth.js';
 import { emitToUser } from '../ws.js';
 import {
@@ -46,6 +46,7 @@ const createOrderSchema = z.object({
   scheduledAt: z.string().datetime().optional(),
   asap: z.boolean().default(false),
   photoUrls: z.array(photoUrlSchema).max(5).default([]),
+  wasteType: z.enum(['household', 'construction', 'bulky']).default('household'),
 }).superRefine((data, ctx) => {
   if (!data.asap && !data.scheduledAt) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'scheduledAt required when asap is false', path: ['scheduledAt'] });
@@ -339,6 +340,19 @@ ordersRouter.post('/', async (c) => {
     return c.json({ error: { code: 'VALIDATION', message: 'Invalid input', details: parsed.error.flatten().fieldErrors } }, 400);
   }
 
+  // Check if address is blocked for this customer
+  const normalizedAddress = parsed.data.address.trim().toLowerCase();
+  const blocked = await db.select({ id: blockedAddresses.id })
+    .from(blockedAddresses)
+    .where(and(
+      eq(blockedAddresses.customerId, user.userId),
+      sql`lower(${blockedAddresses.address}) = ${normalizedAddress}`,
+    ))
+    .limit(1);
+  if (blocked.length > 0) {
+    return c.json({ error: { code: 'ADDRESS_BLOCKED', message: 'Этот адрес заблокирован из-за неоплаты. Обратитесь в поддержку.' } }, 403);
+  }
+
   const newOrder = await db.insert(orders).values({
     customerId: user.userId,
     address: parsed.data.address,
@@ -349,6 +363,7 @@ ordersRouter.post('/', async (c) => {
     photoUrls: JSON.stringify(parsed.data.photoUrls),
     asap: parsed.data.asap,
     scheduledAt: parsed.data.asap ? null : new Date(parsed.data.scheduledAt!),
+    wasteType: parsed.data.wasteType,
   }).returning();
 
   await db.insert(orderHistory).values({
@@ -926,6 +941,46 @@ ordersRouter.post('/:id/payment-dispute', async (c) => {
   return c.json({ data: { ok: true } });
 });
 
+// POST /orders/:id/block-customer — contractor blocks customer's address for non-payment
+ordersRouter.post('/:id/block-customer', async (c) => {
+  const user = c.get('user');
+  const id = c.req.param('id');
+
+  const current = await db.select().from(orders).where(eq(orders.id, id)).limit(1);
+  if (current.length === 0) return c.json({ error: { code: 'NOT_FOUND', message: 'Order not found' } }, 404);
+  const order = current[0];
+
+  if (order.contractorId !== user.userId) return c.json({ error: { code: 'FORBIDDEN', message: 'Not your order' } }, 403);
+
+  const alreadyBlocked = await db.select({ id: blockedAddresses.id })
+    .from(blockedAddresses)
+    .where(and(eq(blockedAddresses.customerId, order.customerId), sql`lower(${blockedAddresses.address}) = lower(${order.address})`))
+    .limit(1);
+  if (alreadyBlocked.length > 0) return c.json({ error: { code: 'CONFLICT', message: 'Address already blocked' } }, 409);
+
+  await db.insert(blockedAddresses).values({
+    address: order.address,
+    customerId: order.customerId,
+    contractorId: user.userId,
+    orderId: id,
+    reason: `Non-payment on order ${id}`,
+  });
+
+  await db.update(users)
+    .set({ frozen: true, freezeReason: `Заблокирован за неоплату заказа ${id}` } as any)
+    .where(eq(users.id, order.customerId));
+
+  await db.insert(orderHistory).values({
+    orderId: id,
+    status: order.status,
+    note: `BLOCK: contractor ${user.userId} blocked customer address for non-payment`,
+  });
+
+  notifyUser(order.customerId, '⛔ Аккаунт заморожен', 'Исполнитель заблокировал вас за неоплату. Оспорьте блокировку в профиле.', id);
+
+  return c.json({ data: { ok: true } });
+});
+
 // Helper
 function formatOrder(o: typeof orders.$inferSelect) {
   let photoUrls: string[] = [];
@@ -946,6 +1001,7 @@ function formatOrder(o: typeof orders.$inferSelect) {
     completionPhotoUrls,
     asap: o.asap ?? false,
     scheduledAt: o.scheduledAt ? o.scheduledAt.toISOString() : null,
+    wasteType: o.wasteType ?? 'household',
     createdAt: o.createdAt.toISOString(),
     updatedAt: o.updatedAt.toISOString(),
     ratingByCustomer: o.ratingByCustomer ?? null,
