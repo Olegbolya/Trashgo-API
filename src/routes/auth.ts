@@ -94,11 +94,28 @@ auth.post('/login', async (c) => {
   }
 
   // Look up user by email
-  const existing = await db.select({ id: users.id, phone: users.phone, telegramChatId: users.telegramChatId })
+  const existingByEmail = await db.select({ id: users.id, phone: users.phone, email: users.email, telegramChatId: users.telegramChatId })
     .from(users).where(eq(users.email, email)).limit(1);
 
-  // New user flow: if not found and no phone provided — ask frontend to show phone field
-  if (existing.length === 0 && !phone) {
+  let existingUser = existingByEmail.length > 0 ? existingByEmail[0] : null;
+
+  // If not found by email and phone was provided — check if this is an existing user by phone (migration case)
+  if (!existingUser && phone) {
+    const byPhone = await db.select({ id: users.id, phone: users.phone, email: users.email, telegramChatId: users.telegramChatId })
+      .from(users).where(eq(users.phone, phone)).limit(1);
+    if (byPhone.length > 0) {
+      if (byPhone[0].email && byPhone[0].email !== email) {
+        return c.json({ error: { code: 'EMAIL_MISMATCH', message: 'Этот номер уже привязан к другому email' } }, 409);
+      }
+      if (!byPhone[0].email) {
+        await db.update(users).set({ email }).where(eq(users.id, byPhone[0].id));
+      }
+      existingUser = { ...byPhone[0], email };
+    }
+  }
+
+  // New user flow: if not found by email or phone, and no phone provided — ask frontend to show phone field
+  if (!existingUser && !phone) {
     return c.json({ data: { otpSent: false, isNewUser: true, needsPhone: true, channel: 'email' } });
   }
 
@@ -117,8 +134,8 @@ auth.post('/login', async (c) => {
   if (useEmailOtp) {
     await sendEmailOtp(email, code);
     channel = 'email';
-  } else if (hasTelegram() && existing[0]?.telegramChatId) {
-    await sendTelegramOtp(existing[0].telegramChatId, code);
+  } else if (hasTelegram() && existingUser?.telegramChatId) {
+    await sendTelegramOtp(existingUser.telegramChatId, code);
     channel = 'telegram';
   } else if (hasTelegram()) {
     const botUsername = await getBotUsername();
@@ -138,7 +155,7 @@ auth.post('/login', async (c) => {
   return c.json({
     data: {
       otpSent: true,
-      isNewUser: existing.length === 0,
+      isNewUser: existingUser === null,
       needsPhone: false,
       channel,
       deliveryEmail: email,
