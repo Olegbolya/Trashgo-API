@@ -1,8 +1,10 @@
 import { Hono } from 'hono';
-import { eq, and, isNotNull, avg, count, desc } from 'drizzle-orm';
+import { eq, and, isNotNull, avg, count, desc, gt, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '../db/index.js';
-import { users, orders } from '../db/schema.js';
+import { users, orders, otpCodes } from '../db/schema.js';
+import { sendEmailOtp, isEmailEnabled } from '../lib/email.js';
+import { rateLimit } from '../lib/rateLimit.js';
 import { authMiddleware, type JwtPayload } from '../middleware/auth.js';
 
 const usersRouter = new Hono<{ Variables: { user: JwtPayload } }>();
@@ -14,7 +16,6 @@ const TRANSPORT_MODES = ['pedestrian', 'scooter', 'bicycle', 'e-bicycle', 'moto'
 const updateProfileSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   district: z.string().min(1).max(100).optional(),
-  email: z.string().email().max(200).optional().nullable(),
   transportMode: z.enum(TRANSPORT_MODES).optional(),
   addresses: z.array(z.string().max(300)).max(10).optional(),
   notifPush: z.boolean().optional(),
@@ -71,6 +72,7 @@ usersRouter.get('/me', async (c) => {
       notifPush: u.notifPush ?? true,
       notifEmail: u.notifEmail ?? false,
       notifEmailAddress: u.notifEmailAddress ?? null,
+      notifTelegram: (u as any).notifTelegram ?? true,
       email: u.email ?? null,
       telegramLinked: !!u.telegramChatId,
       isAvailable: u.isAvailable ?? true,
@@ -93,13 +95,12 @@ usersRouter.patch('/me', async (c) => {
     return c.json({ error: { code: 'VALIDATION', message: 'Invalid input' } }, 400);
   }
 
-  const { addresses, notifEmailAddress, fcmToken, inn, email, ...rest } = parsed.data;
+  const { addresses, notifEmailAddress, fcmToken, inn, ...rest } = parsed.data;
   const dbSet: Record<string, unknown> = { ...rest };
   if (addresses !== undefined) dbSet.addresses = JSON.stringify(addresses);
   if (notifEmailAddress !== undefined) dbSet.notifEmailAddress = notifEmailAddress;
   if (fcmToken !== undefined) dbSet.fcmToken = fcmToken;
   if (inn !== undefined) dbSet.inn = inn;
-  if (email !== undefined) dbSet.email = email;
 
   const updated = await db.update(users)
     .set(dbSet as any)
@@ -131,6 +132,7 @@ usersRouter.patch('/me', async (c) => {
       notifEmailAddress: u.notifEmailAddress ?? null,
       notifTelegram: (u as any).notifTelegram ?? true,
       email: u.email ?? null,
+      telegramLinked: !!(u as any).telegramChatId,
       isAvailable: u.isAvailable ?? true,
       inn: u.inn ?? null,
       innVerified: u.innVerified ?? false,
@@ -335,6 +337,92 @@ usersRouter.post('/verify-inn', async (c) => {
     .where(eq(users.id, userId));
 
   return c.json({ data: { inn, selfEmployed } });
+});
+
+// POST /users/request-email-change — send OTP to new email
+usersRouter.post('/request-email-change', async (c) => {
+  const { userId } = c.get('user');
+  const { email } = await c.req.json().catch(() => ({}));
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email))) {
+    return c.json({ error: { code: 'VALIDATION', message: 'Введите корректный email' } }, 400);
+  }
+
+  const retryAfter = rateLimit(`email_change:${userId}`, 3, 10 * 60 * 1000);
+  if (retryAfter > 0) {
+    c.header('Retry-After', String(retryAfter));
+    return c.json({ error: { code: 'RATE_LIMITED', message: 'Слишком много попыток. Подождите.' } }, 429);
+  }
+
+  // Check email not already taken by another user
+  const taken = await db.select({ id: users.id }).from(users)
+    .where(and(eq(users.email, email as string), ne(users.id, userId))).limit(1);
+  if (taken.length > 0) {
+    return c.json({ error: { code: 'EMAIL_TAKEN', message: 'Этот email уже используется другим аккаунтом' } }, 409);
+  }
+
+  const forceCode = process.env.TEST_OTP_CODE;
+  const code = forceCode || String(Math.floor(1000 + Math.random() * 9000));
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  const otpKey = `ec:${userId}`;
+
+  // Invalidate previous pending email-change OTPs for this user
+  await db.update(otpCodes).set({ used: 1 }).where(and(eq(otpCodes.phone, otpKey), eq(otpCodes.used, 0)));
+  await db.insert(otpCodes).values({ phone: otpKey, code, expiresAt });
+
+  if (isEmailEnabled()) {
+    await sendEmailOtp(email as string, code);
+  } else {
+    console.log(`[OTP DEV] email-change ${email}: ${code}`);
+  }
+
+  return c.json({
+    data: {
+      sent: true,
+      ...(forceCode ? { devCode: code } : {}),
+    },
+  });
+});
+
+// POST /users/confirm-email-change — verify OTP and save new email
+usersRouter.post('/confirm-email-change', async (c) => {
+  const { userId } = c.get('user');
+  const { email, code } = await c.req.json().catch(() => ({}));
+
+  if (!email || !code) {
+    return c.json({ error: { code: 'VALIDATION', message: 'email и code обязательны' } }, 400);
+  }
+
+  const verifyRetryAfter = rateLimit(`ec_verify:${userId}`, 5, 10 * 60 * 1000);
+  if (verifyRetryAfter > 0) {
+    c.header('Retry-After', String(verifyRetryAfter));
+    return c.json({ error: { code: 'RATE_LIMITED', message: 'Слишком много попыток' } }, 429);
+  }
+
+  const otpKey = `ec:${userId}`;
+  const otp = await db.select().from(otpCodes)
+    .where(and(
+      eq(otpCodes.phone, otpKey),
+      eq(otpCodes.code, String(code)),
+      eq(otpCodes.used, 0),
+      gt(otpCodes.expiresAt, new Date()),
+    )).limit(1);
+
+  if (otp.length === 0) {
+    return c.json({ error: { code: 'INVALID_OTP', message: 'Неверный или истёкший код' } }, 400);
+  }
+
+  // Check email not taken (race condition guard)
+  const taken = await db.select({ id: users.id }).from(users)
+    .where(and(eq(users.email, String(email)), ne(users.id, userId))).limit(1);
+  if (taken.length > 0) {
+    return c.json({ error: { code: 'EMAIL_TAKEN', message: 'Этот email уже занят' } }, 409);
+  }
+
+  await db.update(otpCodes).set({ used: 1 }).where(eq(otpCodes.id, otp[0].id));
+  await db.update(users).set({ email: String(email) }).where(eq(users.id, userId));
+
+  return c.json({ data: { ok: true, email } });
 });
 
 export default usersRouter;
