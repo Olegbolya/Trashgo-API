@@ -14,11 +14,13 @@ const TRANSPORT_MODES = ['pedestrian', 'scooter', 'bicycle', 'e-bicycle', 'moto'
 const updateProfileSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   district: z.string().min(1).max(100).optional(),
+  email: z.string().email().max(200).optional().nullable(),
   transportMode: z.enum(TRANSPORT_MODES).optional(),
   addresses: z.array(z.string().max(300)).max(10).optional(),
   notifPush: z.boolean().optional(),
   notifEmail: z.boolean().optional(),
   notifEmailAddress: z.string().email().max(200).optional().nullable(),
+  notifTelegram: z.boolean().optional(),
   fcmToken: z.string().max(300).optional().nullable(),
   isAvailable: z.boolean().optional(),
   inn: z.string().regex(/^\d{12}$/).optional().nullable(),
@@ -91,12 +93,13 @@ usersRouter.patch('/me', async (c) => {
     return c.json({ error: { code: 'VALIDATION', message: 'Invalid input' } }, 400);
   }
 
-  const { addresses, notifEmailAddress, fcmToken, inn, ...rest } = parsed.data;
+  const { addresses, notifEmailAddress, fcmToken, inn, email, ...rest } = parsed.data;
   const dbSet: Record<string, unknown> = { ...rest };
   if (addresses !== undefined) dbSet.addresses = JSON.stringify(addresses);
   if (notifEmailAddress !== undefined) dbSet.notifEmailAddress = notifEmailAddress;
   if (fcmToken !== undefined) dbSet.fcmToken = fcmToken;
   if (inn !== undefined) dbSet.inn = inn;
+  if (email !== undefined) dbSet.email = email;
 
   const updated = await db.update(users)
     .set(dbSet as any)
@@ -126,6 +129,8 @@ usersRouter.patch('/me', async (c) => {
       notifPush: u.notifPush ?? true,
       notifEmail: u.notifEmail ?? false,
       notifEmailAddress: u.notifEmailAddress ?? null,
+      notifTelegram: (u as any).notifTelegram ?? true,
+      email: u.email ?? null,
       isAvailable: u.isAvailable ?? true,
       inn: u.inn ?? null,
       innVerified: u.innVerified ?? false,
