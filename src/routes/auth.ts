@@ -3,9 +3,9 @@ import { z } from 'zod';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { nanoid } from 'nanoid';
-import { eq, and, gt, desc } from 'drizzle-orm';
+import { eq, and, gt, desc, avg, count, isNotNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { users, otpCodes, refreshTokens, referrals } from '../db/schema.js';
+import { users, otpCodes, refreshTokens, referrals, orders } from '../db/schema.js';
 import { checkReferralAchievements } from '../lib/achievements.js';
 import { emitToUser } from '../ws.js';
 import { sendOtp, hasSms } from '../lib/sms.js';
@@ -236,16 +236,49 @@ auth.post('/verify', async (c) => {
     expiresAt: refreshExpires,
   });
 
+  // Compute full user data (same as /users/me) so the frontend gets a complete User object
+  const isContractor = userRow.role === 'contractor';
+  const ratingData = await db.select({
+    avgRating: avg(isContractor ? orders.ratingByCustomer : orders.ratingByContractor),
+    ratingCount: count(isContractor ? orders.ratingByCustomer : orders.ratingByContractor),
+  }).from(orders).where(
+    isContractor
+      ? and(eq(orders.contractorId, userRow.id), isNotNull(orders.ratingByCustomer))
+      : and(eq(orders.customerId, userRow.id), isNotNull(orders.ratingByContractor))
+  );
+
+  const avgRating = ratingData[0]?.avgRating ? parseFloat(ratingData[0].avgRating) : null;
+  const ratingCount = ratingData[0]?.ratingCount ?? 0;
+
+  let parsedAddresses: string[] = [];
+  try { parsedAddresses = JSON.parse((userRow as any).addresses || '[]'); } catch {}
+
   return c.json({
     data: {
       user: {
         id: userRow.id,
         phone: userRow.phone,
+        email: (userRow as any).email ?? null,
         name: userRow.name,
         role: userRow.role,
         district: userRow.district,
+        transportMode: (userRow as any).transportMode ?? 'car',
         xp: userRow.xp,
         level: userRow.level,
+        balance: (userRow as any).balance ?? 0,
+        addresses: parsedAddresses,
+        avgRating,
+        ratingCount,
+        notifPush: (userRow as any).notifPush ?? true,
+        notifEmail: (userRow as any).notifEmail ?? false,
+        notifEmailAddress: (userRow as any).notifEmailAddress ?? null,
+        notifTelegram: (userRow as any).notifTelegram ?? true,
+        telegramLinked: !!(userRow as any).telegramChatId,
+        isAvailable: (userRow as any).isAvailable ?? true,
+        inn: (userRow as any).inn ?? null,
+        innVerified: (userRow as any).innVerified ?? false,
+        frozen: (userRow as any).frozen ?? false,
+        freezeReason: (userRow as any).freezeReason ?? null,
         createdAt: userRow.createdAt.toISOString(),
       },
       token: tokens.token,
