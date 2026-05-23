@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { eq, and, isNotNull, avg, count, desc, gt, ne } from 'drizzle-orm';
+import { eq, and, isNotNull, avg, count, desc, gt, ne, sql, gte } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '../db/index.js';
 import { users, orders, otpCodes } from '../db/schema.js';
@@ -430,6 +430,41 @@ usersRouter.post('/confirm-email-change', async (c) => {
   await db.update(users).set({ email: String(email) }).where(eq(users.id, userId));
 
   return c.json({ data: { ok: true, email } });
+});
+
+// GET /users/stats — contractor earnings stats (weekly + monthly + all-time)
+usersRouter.get('/stats', async (c) => {
+  const { userId } = c.get('user');
+
+  const now = new Date();
+  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+  const [weekly, monthly, allTime, ratingRow] = await Promise.all([
+    db.select({ total: sql<number>`coalesce(sum(price), 0)::int` })
+      .from(orders)
+      .where(and(eq(orders.contractorId, userId), eq(orders.status, 'completed'), gte(orders.updatedAt, weekAgo))),
+    db.select({ total: sql<number>`coalesce(sum(price), 0)::int` })
+      .from(orders)
+      .where(and(eq(orders.contractorId, userId), eq(orders.status, 'completed'), gte(orders.updatedAt, monthAgo))),
+    db.select({ total: sql<number>`coalesce(sum(price), 0)::int`, cnt: sql<number>`count(*)::int` })
+      .from(orders)
+      .where(and(eq(orders.contractorId, userId), eq(orders.status, 'completed'))),
+    db.select({ avg: avg(orders.ratingByCustomer), cnt: count(orders.ratingByCustomer) })
+      .from(orders)
+      .where(and(eq(orders.contractorId, userId), isNotNull(orders.ratingByCustomer))),
+  ]);
+
+  return c.json({
+    data: {
+      weeklyEarnings: Number(weekly[0]?.total ?? 0),
+      monthlyEarnings: Number(monthly[0]?.total ?? 0),
+      totalEarnings: Number(allTime[0]?.total ?? 0),
+      completedOrders: Number(allTime[0]?.cnt ?? 0),
+      avgRating: ratingRow[0]?.avg ? parseFloat(ratingRow[0].avg) : null,
+      ratingCount: Number(ratingRow[0]?.cnt ?? 0),
+    },
+  });
 });
 
 export default usersRouter;

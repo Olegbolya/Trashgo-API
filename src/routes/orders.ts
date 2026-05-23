@@ -5,6 +5,7 @@ import { alias } from 'drizzle-orm/pg-core';
 import { db } from '../db/index.js';
 import { orders, orderHistory, users, messages, referrals, blockedAddresses } from '../db/schema.js';
 import { authMiddleware, type JwtPayload } from '../middleware/auth.js';
+import { rateLimit } from '../lib/rateLimit.js';
 import { emitToUser } from '../ws.js';
 import {
   checkOrderAchievements, checkRatingAchievements, checkAsapAchievements,
@@ -145,72 +146,56 @@ ordersRouter.get('/available', async (c) => {
 // GET /orders/:id
 ordersRouter.get('/:id', async (c) => {
   const id = c.req.param('id');
-  const result = await db
-    .select({ order: orders, customerName: users.name, customerPhone: users.phone })
-    .from(orders)
-    .leftJoin(users, eq(orders.customerId, users.id))
-    .where(eq(orders.id, id))
-    .limit(1);
+
+  // Round 1: main order + history in parallel
+  const [result, historyRows] = await Promise.all([
+    db.select({ order: orders, customerName: users.name, customerPhone: users.phone })
+      .from(orders)
+      .leftJoin(users, eq(orders.customerId, users.id))
+      .where(eq(orders.id, id))
+      .limit(1),
+    db.select({ status: orderHistory.status, createdAt: orderHistory.createdAt, note: orderHistory.note })
+      .from(orderHistory)
+      .where(eq(orderHistory.orderId, id))
+      .orderBy(asc(orderHistory.createdAt)),
+  ]);
 
   if (result.length === 0) {
     return c.json({ error: { code: 'NOT_FOUND', message: 'Order not found' } }, 404);
   }
 
   const row = result[0];
-  let contractorPhone = '';
-  let contractorName = '';
-  let contractorAvgRating: number | null = null;
-  let contractorRatingCount = 0;
-  let contractorCompletedOrders = 0;
-  let customerAvgRating: number | null = null;
-  let customerRatingCount = 0;
-  let customerCompletedOrders = 0;
-  let acceptedAt: string | null = null;
+  const history = historyRows.map(h => ({ status: h.status, createdAt: h.createdAt.toISOString(), note: h.note }));
+  const acceptedAt = historyRows.find(h => h.status === 'accepted')?.createdAt.toISOString() ?? null;
 
-  // Contractor profile
-  if (row.order.contractorId) {
-    const [contractor] = await db.select({ name: users.name, phone: users.phone })
-      .from(users).where(eq(users.id, row.order.contractorId)).limit(1);
-    contractorPhone = contractor?.phone ?? '';
-    contractorName = contractor?.name ?? '';
+  // Round 2: contractor data + customer data in parallel
+  const [contractorResult, customerResult] = await Promise.all([
+    row.order.contractorId ? Promise.all([
+      db.select({ name: users.name, phone: users.phone }).from(users).where(eq(users.id, row.order.contractorId!)).limit(1),
+      db.select({ avg: avg(orders.ratingByCustomer), cnt: count(orders.ratingByCustomer) })
+        .from(orders).where(and(eq(orders.contractorId, row.order.contractorId!), isNotNull(orders.ratingByCustomer))),
+      db.select({ cnt: sql<number>`count(*)::int` })
+        .from(orders).where(and(eq(orders.contractorId, row.order.contractorId!), eq(orders.status, 'completed'))),
+    ]) : Promise.resolve([[], [{ avg: null, cnt: 0 }], [{ cnt: 0 }]] as const),
+    Promise.all([
+      db.select({ avg: avg(orders.ratingByContractor), cnt: count(orders.ratingByContractor) })
+        .from(orders).where(and(eq(orders.customerId, row.order.customerId), isNotNull(orders.ratingByContractor))),
+      db.select({ cnt: sql<number>`count(*)::int` })
+        .from(orders).where(and(eq(orders.customerId, row.order.customerId), eq(orders.status, 'completed'))),
+    ]),
+  ]);
 
-    const [cRating] = await db.select({ avg: avg(orders.ratingByCustomer), cnt: count(orders.ratingByCustomer) })
-      .from(orders).where(and(eq(orders.contractorId, row.order.contractorId), isNotNull(orders.ratingByCustomer)));
-    contractorAvgRating = cRating?.avg ? parseFloat(cRating.avg) : null;
-    contractorRatingCount = Number(cRating?.cnt ?? 0);
+  const [[contractor], [cRating], [ccRow]] = contractorResult as [any[], any[], any[]];
+  const [[cuRating], [custRow]] = customerResult;
 
-    const [ccRow] = await db.select({ cnt: sql<number>`count(*)::int` })
-      .from(orders).where(and(eq(orders.contractorId, row.order.contractorId), eq(orders.status, 'completed')));
-    contractorCompletedOrders = Number(ccRow?.cnt ?? 0);
-  }
-
-  // Customer profile
-  const [cuRating] = await db.select({ avg: avg(orders.ratingByContractor), cnt: count(orders.ratingByContractor) })
-    .from(orders).where(and(eq(orders.customerId, row.order.customerId), isNotNull(orders.ratingByContractor)));
-  customerAvgRating = cuRating?.avg ? parseFloat(cuRating.avg) : null;
-  customerRatingCount = Number(cuRating?.cnt ?? 0);
-
-  const [custRow] = await db.select({ cnt: sql<number>`count(*)::int` })
-    .from(orders).where(and(eq(orders.customerId, row.order.customerId), eq(orders.status, 'completed')));
-  customerCompletedOrders = Number(custRow?.cnt ?? 0);
-
-  // Order history timeline + acceptedAt
-  const historyRows = await db.select({
-    status: orderHistory.status,
-    createdAt: orderHistory.createdAt,
-    note: orderHistory.note,
-  }).from(orderHistory)
-    .where(eq(orderHistory.orderId, id))
-    .orderBy(asc(orderHistory.createdAt));
-
-  const history = historyRows.map(h => ({
-    status: h.status,
-    createdAt: h.createdAt.toISOString(),
-    note: h.note,
-  }));
-
-  const acceptedRow = historyRows.find(h => h.status === 'accepted');
-  if (acceptedRow) acceptedAt = acceptedRow.createdAt.toISOString();
+  const contractorPhone = contractor?.phone ?? '';
+  const contractorName = contractor?.name ?? '';
+  const contractorAvgRating = cRating?.avg ? parseFloat(cRating.avg) : null;
+  const contractorRatingCount = Number(cRating?.cnt ?? 0);
+  const contractorCompletedOrders = Number(ccRow?.cnt ?? 0);
+  const customerAvgRating = cuRating?.avg ? parseFloat(cuRating.avg) : null;
+  const customerRatingCount = Number(cuRating?.cnt ?? 0);
+  const customerCompletedOrders = Number(custRow?.cnt ?? 0);
 
   return c.json({ data: {
     ...formatOrder(row.order),
@@ -334,6 +319,14 @@ ordersRouter.patch('/:id', async (c) => {
 // POST /orders — create an order (any authenticated user)
 ordersRouter.post('/', async (c) => {
   const user = c.get('user');
+
+  // Rate limit: max 10 orders per hour per user
+  const retryAfter = rateLimit(`order:${user.userId}`, 10, 60 * 60 * 1000);
+  if (retryAfter > 0) {
+    c.header('Retry-After', String(retryAfter));
+    return c.json({ error: { code: 'RATE_LIMITED', message: 'Слишком много заказов. Подождите немного.' } }, 429);
+  }
+
   const body = await c.req.json();
   const parsed = createOrderSchema.safeParse(body);
 

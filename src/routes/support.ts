@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { eq, desc, sql, and, isNull } from 'drizzle-orm';
+import { eq, desc, sql, and, isNull, lt } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { supportMessages, users } from '../db/schema.js';
 import { authMiddleware, type JwtPayload } from '../middleware/auth.js';
@@ -98,17 +98,29 @@ supportRouter.post('/', async (c) => {
   }, 201);
 });
 
-// GET /support — get my support thread
+// GET /support — get my support thread (cursor pagination by createdAt)
+// ?before=<ISO timestamp>&limit=20
 supportRouter.get('/', async (c) => {
   const { userId } = c.get('user');
+  const before = c.req.query('before');
+  const limit = Math.min(50, Math.max(1, parseInt(c.req.query('limit') ?? '20', 10) || 20));
+
+  const conditions: any[] = [eq(supportMessages.userId, userId)];
+  if (before) {
+    const d = new Date(before);
+    if (!isNaN(d.getTime())) conditions.push(lt(supportMessages.createdAt, d));
+  }
 
   const rows = await db.select().from(supportMessages)
-    .where(eq(supportMessages.userId, userId))
+    .where(and(...conditions))
     .orderBy(desc(supportMessages.createdAt))
-    .limit(50);
+    .limit(limit + 1);
+
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
 
   return c.json({
-    data: rows.map(r => ({
+    data: page.map(r => ({
       id: r.id,
       message: r.message,
       reply: r.reply,
@@ -120,6 +132,7 @@ supportRouter.get('/', async (c) => {
       isBotReply: r.isBotReply,
       escalated: r.escalated,
     })),
+    meta: { hasMore, nextBefore: hasMore ? page[page.length - 1].createdAt.toISOString() : null },
   });
 });
 

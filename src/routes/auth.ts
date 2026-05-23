@@ -185,16 +185,17 @@ auth.post('/verify', async (c) => {
     return c.json({ error: { code: 'RATE_LIMITED', message: 'Too many attempts. Try again later.' } }, 429);
   }
 
-  // Find valid OTP (key = email or phone)
-  const otp = await db.select()
-    .from(otpCodes)
+  // Atomically mark OTP as used — single UPDATE prevents race condition where
+  // two concurrent requests both pass the SELECT check
+  const otp = await db.update(otpCodes)
+    .set({ used: 1 })
     .where(and(
       eq(otpCodes.phone, otpKey),
       eq(otpCodes.code, code),
       eq(otpCodes.used, 0),
       gt(otpCodes.expiresAt, new Date()),
     ))
-    .limit(1);
+    .returning();
 
   if (otp.length === 0) {
     return c.json({ error: { code: 'INVALID_OTP', message: 'Wrong or expired code' } }, 400);
@@ -205,13 +206,10 @@ auth.post('/verify', async (c) => {
     ? await db.select().from(users).where(eq(users.email, email)).limit(1)
     : await db.select().from(users).where(eq(users.phone, phone!)).limit(1);
 
-  // Block frozen accounts before consuming the OTP
+  // Block frozen accounts
   if (userRows.length > 0 && (userRows[0] as any).frozen) {
     return c.json({ error: { code: 'ACCOUNT_FROZEN', message: 'Ваш аккаунт заморожен. Обратитесь в поддержку.' } }, 403);
   }
-
-  // Mark OTP as used only after confirming the account can proceed
-  await db.update(otpCodes).set({ used: 1 }).where(eq(otpCodes.id, otp[0].id));
 
   if (userRows.length === 0) {
     return c.json({
