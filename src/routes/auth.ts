@@ -88,7 +88,7 @@ auth.post('/login', async (c) => {
   const { email, phone, deliveryEmail } = parsed.data;
 
   // Rate limit by email
-  const retryAfter = rateLimit(email);
+  const retryAfter = await rateLimit(email);
   if (retryAfter > 0) {
     c.header('Retry-After', String(retryAfter));
     return c.json({ error: { code: 'RATE_LIMITED', message: 'Слишком много попыток. Подождите.' } }, 429);
@@ -179,7 +179,7 @@ auth.post('/verify', async (c) => {
   if (!otpKey) return c.json({ error: { code: 'VALIDATION', message: 'email or phone required' } }, 400);
 
   // Brute-force protection
-  const verifyRetryAfter = rateLimit(`verify:${otpKey}`, 5, 10 * 60 * 1000);
+  const verifyRetryAfter = await rateLimit(`verify:${otpKey}`, 5, 10 * 60 * 1000);
   if (verifyRetryAfter > 0) {
     c.header('Retry-After', String(verifyRetryAfter));
     return c.json({ error: { code: 'RATE_LIMITED', message: 'Too many attempts. Try again later.' } }, 429);
@@ -509,7 +509,7 @@ auth.post('/request-telegram', async (c) => {
     return c.json({ error: { code: 'VALIDATION', message: 'Phone required' } }, 400);
   }
 
-  const retryAfter = rateLimit(`tg:${phone}`, 3, 5 * 60 * 1000);
+  const retryAfter = await rateLimit(`tg:${phone}`, 3, 5 * 60 * 1000);
   if (retryAfter > 0) {
     c.header('Retry-After', String(retryAfter));
     return c.json({ error: { code: 'RATE_LIMITED', message: 'Too many requests' } }, 429);

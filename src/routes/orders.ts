@@ -321,7 +321,7 @@ ordersRouter.post('/', async (c) => {
   const user = c.get('user');
 
   // Rate limit: max 10 orders per hour per user
-  const retryAfter = rateLimit(`order:${user.userId}`, 10, 60 * 60 * 1000);
+  const retryAfter = await rateLimit(`order:${user.userId}`, 10, 60 * 60 * 1000);
   if (retryAfter > 0) {
     c.header('Retry-After', String(retryAfter));
     return c.json({ error: { code: 'RATE_LIMITED', message: 'Слишком много заказов. Подождите немного.' } }, 429);

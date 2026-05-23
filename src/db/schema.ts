@@ -172,3 +172,12 @@ export const refreshTokens = pgTable('refresh_tokens', {
   expiresAt: timestamp('expires_at').notNull(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
+
+// Rate limit buckets (persistent across restarts, auto-cleaned by cron)
+export const rateLimits = pgTable('rate_limits', {
+  key: varchar('key', { length: 200 }).primaryKey(),
+  count: integer('count').notNull().default(1),
+  resetAt: timestamp('reset_at').notNull(),
+}, (table) => [
+  index('idx_rate_limits_reset').on(table.resetAt),
+]);

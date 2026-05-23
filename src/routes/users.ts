@@ -350,7 +350,7 @@ usersRouter.post('/request-email-change', async (c) => {
     return c.json({ error: { code: 'VALIDATION', message: 'Введите корректный email' } }, 400);
   }
 
-  const retryAfter = rateLimit(`email_change:${userId}`, 3, 10 * 60 * 1000);
+  const retryAfter = await rateLimit(`email_change:${userId}`, 3, 10 * 60 * 1000);
   if (retryAfter > 0) {
     c.header('Retry-After', String(retryAfter));
     return c.json({ error: { code: 'RATE_LIMITED', message: 'Слишком много попыток. Подождите.' } }, 429);
@@ -400,7 +400,7 @@ usersRouter.post('/confirm-email-change', async (c) => {
     return c.json({ error: { code: 'VALIDATION', message: 'email и code обязательны' } }, 400);
   }
 
-  const verifyRetryAfter = rateLimit(`ec_verify:${userId}`, 5, 10 * 60 * 1000);
+  const verifyRetryAfter = await rateLimit(`ec_verify:${userId}`, 5, 10 * 60 * 1000);
   if (verifyRetryAfter > 0) {
     c.header('Retry-After', String(verifyRetryAfter));
     return c.json({ error: { code: 'RATE_LIMITED', message: 'Слишком много попыток' } }, 429);

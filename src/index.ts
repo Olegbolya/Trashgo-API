@@ -304,6 +304,8 @@ async function runMigrations() {
     ['orders.waste_type', `ALTER TABLE orders ADD COLUMN IF NOT EXISTS waste_type VARCHAR(50) NOT NULL DEFAULT 'household'`],
     ['blocked_addresses table', `CREATE TABLE IF NOT EXISTS blocked_addresses (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), address TEXT NOT NULL, customer_id UUID NOT NULL REFERENCES users(id), contractor_id UUID NOT NULL REFERENCES users(id), order_id UUID REFERENCES orders(id), reason TEXT NOT NULL DEFAULT '', created_at TIMESTAMP NOT NULL DEFAULT NOW())`],
     ['idx_blocked_addresses_customer', `CREATE INDEX IF NOT EXISTS idx_blocked_addresses_customer ON blocked_addresses(customer_id)`],
+    ['rate_limits table', `CREATE TABLE IF NOT EXISTS rate_limits (key VARCHAR(200) PRIMARY KEY, count INTEGER NOT NULL DEFAULT 1, reset_at TIMESTAMP NOT NULL)`],
+    ['idx_rate_limits_reset', `CREATE INDEX IF NOT EXISTS idx_rate_limits_reset ON rate_limits(reset_at)`],
   ];
 
   for (const [name, ddl] of steps) {
