@@ -28,8 +28,7 @@ const ROOTS = [
 const PATTERNS = ROOTS.map(r => new RegExp(r, 'gi'));
 
 function mask(word: string): string {
-  if (word.length <= 2) return word[0] + '*'.repeat(word.length - 1);
-  return word[0] + '*'.repeat(word.length - 2) + word[word.length - 1];
+  return '*'.repeat(word.length);
 }
 
 export function censor(text: string): string {
