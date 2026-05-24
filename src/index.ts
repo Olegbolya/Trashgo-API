@@ -164,10 +164,16 @@ app.post('/api/v1/auth/telegram/webhook', async (c) => {
     if (rows.length > 0) {
       await db.update(usersTable).set({ telegramChatId: chatId } as any).where(eq(usersTable.id, rows[0].id));
     }
-    const { sendTelegramOtp } = await import('./lib/telegram.js');
-    await sendTelegramOtp(chatId, tokenEntry.code);
-    if (isNewLink) {
-      await sendTelegramMessage(chatId, '🗑 *TrashGo* — вынос мусора в Казани\n\n✅ Telegram успешно привязан к вашему аккаунту\\!\n\nТеперь уведомления о заказах, коды подтверждения и важные сообщения будут приходить прямо сюда — даже когда приложение закрыто\\.\n\n🌐 Приложение: https://trashgo\\-gamma\\.vercel\\.app', true);
+    if (tokenEntry.linkOnly) {
+      // Account linking flow — just confirm, no OTP code needed
+      await sendTelegramMessage(chatId, '🗑 *TrashGo* — вынос мусора в Казани\n\n✅ Telegram успешно привязан к вашему аккаунту\\!\n\nТеперь уведомления о заказах и важные сообщения будут приходить прямо сюда — даже когда приложение закрыто\\.\n\n🌐 Приложение: https://trashgo\\-gamma\\.vercel\\.app', true);
+    } else {
+      // Auth / OTP flow — send the code
+      const { sendTelegramOtp } = await import('./lib/telegram.js');
+      await sendTelegramOtp(chatId, tokenEntry.code);
+      if (isNewLink) {
+        await sendTelegramMessage(chatId, '🗑 *TrashGo* — вынос мусора в Казани\n\n✅ Telegram успешно привязан к вашему аккаунту\\!\n\nТеперь уведомления о заказах, коды подтверждения и важные сообщения будут приходить прямо сюда — даже когда приложение закрыто\\.\n\n🌐 Приложение: https://trashgo\\-gamma\\.vercel\\.app', true);
+      }
     }
     return c.json({ ok: true });
   }

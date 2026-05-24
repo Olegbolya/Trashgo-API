@@ -538,6 +538,7 @@ auth.post('/request-telegram', async (c) => {
 
   const body = await c.req.json().catch(() => ({}));
   const phone = String(body?.phone ?? '').trim();
+  const linkOnly = body?.linkOnly === true;
   if (!phone) {
     return c.json({ error: { code: 'VALIDATION', message: 'Phone required' } }, 400);
   }
@@ -548,19 +549,22 @@ auth.post('/request-telegram', async (c) => {
     return c.json({ error: { code: 'RATE_LIMITED', message: 'Too many requests' } }, 429);
   }
 
-  // Reuse existing valid OTP or create new one
-  const existing = await db.select()
-    .from(otpCodes)
-    .where(and(eq(otpCodes.phone, phone), eq(otpCodes.used, 0), gt(otpCodes.expiresAt, new Date())))
-    .orderBy(desc(otpCodes.createdAt))
-    .limit(1);
+  // For link-only flow we don't need an OTP code — use a dummy that won't be sent
+  let code = 'LINK';
+  if (!linkOnly) {
+    // Reuse existing valid OTP or create new one
+    const existing = await db.select()
+      .from(otpCodes)
+      .where(and(eq(otpCodes.phone, phone), eq(otpCodes.used, 0), gt(otpCodes.expiresAt, new Date())))
+      .orderBy(desc(otpCodes.createdAt))
+      .limit(1);
 
-  let code: string;
-  if (existing.length > 0) {
-    code = existing[0].code;
-  } else {
-    code = String(Math.floor(1000 + Math.random() * 9000));
-    await db.insert(otpCodes).values({ phone, code, expiresAt: new Date(Date.now() + 10 * 60 * 1000) });
+    if (existing.length > 0) {
+      code = existing[0].code;
+    } else {
+      code = String(Math.floor(1000 + Math.random() * 9000));
+      await db.insert(otpCodes).values({ phone, code, expiresAt: new Date(Date.now() + 10 * 60 * 1000) });
+    }
   }
 
   const botUsername = await getBotUsername();
@@ -570,7 +574,7 @@ auth.post('/request-telegram', async (c) => {
 
   cleanupTelegramTokens();
   const startToken = nanoid(8);
-  telegramTokens.set(startToken, { phone, code, exp: Date.now() + 10 * 60 * 1000 });
+  telegramTokens.set(startToken, { phone, code, exp: Date.now() + 10 * 60 * 1000, linkOnly });
   const telegramBotLink = `https://t.me/${botUsername}?start=${startToken}`;
 
   return c.json({ data: { telegramBotLink } });
