@@ -41,10 +41,21 @@ const allowedOrigins = [
   'https://trashgo-coral.vercel.app',
   'https://trashgo-gamma.vercel.app',
   'https://web-production-8d2c4.up.railway.app',
+  // Capacitor Android (androidScheme: 'https')
+  'https://localhost',
+  // Capacitor Android fallback and iOS
+  'capacitor://localhost',
+  'http://localhost',
 ];
 
 app.use('*', cors({
-  origin: allowedOrigins,
+  origin: (origin) => {
+    if (!origin) return '*';
+    if (allowedOrigins.includes(origin)) return origin;
+    // Allow any localhost port for dev
+    if (origin.startsWith('http://localhost:') || origin.startsWith('https://localhost:')) return origin;
+    return allowedOrigins[0];
+  },
   allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
