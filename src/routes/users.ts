@@ -26,6 +26,7 @@ const updateProfileSchema = z.object({
   fcmToken: z.string().max(300).optional().nullable(),
   isAvailable: z.boolean().optional(),
   inn: z.string().regex(/^\d{12}$/).optional().nullable(),
+  sbpBank: z.string().max(100).optional().nullable(),
 });
 
 // GET /users/me
@@ -79,6 +80,7 @@ usersRouter.get('/me', async (c) => {
       isAvailable: u.isAvailable ?? true,
       inn: u.inn ?? null,
       innVerified: u.innVerified ?? false,
+      sbpBank: u.sbpBank ?? null,
       frozen: u.frozen ?? false,
       freezeReason: u.freezeReason ?? null,
       createdAt: u.createdAt.toISOString(),
@@ -96,13 +98,14 @@ usersRouter.patch('/me', async (c) => {
     return c.json({ error: { code: 'VALIDATION', message: 'Invalid input' } }, 400);
   }
 
-  const { addresses, notifEmailAddress, fcmToken, inn, ...rest } = parsed.data;
+  const { addresses, notifEmailAddress, fcmToken, inn, sbpBank, ...rest } = parsed.data;
   const dbSet: Record<string, unknown> = { ...rest };
   if (dbSet.name) dbSet.name = censor(String(dbSet.name));
   if (addresses !== undefined) dbSet.addresses = JSON.stringify(addresses);
   if (notifEmailAddress !== undefined) dbSet.notifEmailAddress = notifEmailAddress;
   if (fcmToken !== undefined) dbSet.fcmToken = fcmToken;
   if (inn !== undefined) dbSet.inn = inn;
+  if (sbpBank !== undefined) dbSet.sbpBank = sbpBank;
 
   const updated = await db.update(users)
     .set(dbSet as any)
@@ -138,6 +141,7 @@ usersRouter.patch('/me', async (c) => {
       isAvailable: u.isAvailable ?? true,
       inn: u.inn ?? null,
       innVerified: u.innVerified ?? false,
+      sbpBank: u.sbpBank ?? null,
       createdAt: u.createdAt.toISOString(),
     },
   });

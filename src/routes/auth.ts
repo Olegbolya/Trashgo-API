@@ -55,6 +55,7 @@ const registerSchema = z.object({
   district: z.string().min(1).max(100),
   transportMode: z.string().optional(),
   inn: z.string().regex(/^\d{12}$/).refine(validateInn12, { message: 'Неверный ИНН (неправильная контрольная сумма)' }).optional().or(z.literal('')),
+  sbpBank: z.string().max(100).optional(),
   refCode: z.string().optional(),
 });
 
@@ -295,7 +296,7 @@ auth.post('/register', async (c) => {
     return c.json({ error: { code: 'VALIDATION', message: 'Invalid input', details: parsed.error.flatten().fieldErrors } }, 400);
   }
 
-  const { email, phone, code, name, role, district, transportMode, inn, refCode } = parsed.data;
+  const { email, phone, code, name, role, district, transportMode, inn, sbpBank, refCode } = parsed.data;
   // OTP key: email (new flow) or phone (legacy)
   const otpKey = email || phone;
 
@@ -344,6 +345,7 @@ auth.post('/register', async (c) => {
     ...(email ? { email } : {}),
     ...(transportMode ? { transportMode } : {}),
     ...(inn ? { inn } : {}),
+    ...(sbpBank ? { sbpBank } : {}),
     referralCode: newReferralCode,
     referredBy: referrerId,
   }).returning();
