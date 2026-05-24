@@ -51,7 +51,7 @@ export async function uploadBase64ToStorage(
     const file = bucket.file(filename);
     const buffer = Buffer.from(base64, 'base64');
     await file.save(buffer, { metadata: { contentType: mimeType } });
-    await file.makePublic();
+    try { await file.makePublic(); } catch { /* uniform bucket-level access — public read via IAM */ }
     return `https://storage.googleapis.com/${process.env.FIREBASE_STORAGE_BUCKET}/${filename}`;
   } catch (e: any) {
     console.error('[Storage] Upload failed:', e.message);
