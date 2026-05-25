@@ -87,11 +87,9 @@ export async function sendPushNotification(
         priority: 'high',
         notification: {
           channelId: 'trashgo_default',
-          sound: 'default',
-          priority: 'high',
           defaultSound: true,
           defaultVibrateTimings: true,
-          clickAction: 'FLUTTER_NOTIFICATION_CLICK',
+          defaultLightSettings: true,
         },
       },
       webpush: {
