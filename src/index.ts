@@ -115,6 +115,12 @@ app.route('/api/v1/support', supportRoutes);
 app.route('/api/v1/upload', uploadRoutes);
 app.route('/api/v1/geocode', geocodeRoutes);
 
+// Public version endpoint — lets the Android app check for updates
+app.get('/api/v1/version', (c) => c.json({
+  latestBuild: parseInt(process.env.LATEST_BUILD ?? '1', 10),
+  latestVersion: process.env.LATEST_VERSION ?? '1.0',
+}));
+
 // Geocoding proxy — avoids Nominatim browser User-Agent restrictions
 // ?q=... &limit=N (default 1, max 5)
 // Bounded to Kazan (viewbox) and restricted to Russia for accuracy
