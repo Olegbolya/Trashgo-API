@@ -86,7 +86,8 @@ auth.post('/login', async (c) => {
     return c.json({ error: { code: 'VALIDATION', message: 'Введите корректный email', details: parsed.error.flatten().fieldErrors } }, 400);
   }
 
-  const { email, phone, deliveryEmail } = parsed.data;
+  const { phone, deliveryEmail } = parsed.data;
+  const email = parsed.data.email.toLowerCase().trim();
 
   // Rate limit by email
   const retryAfter = await rateLimit(email);
@@ -125,7 +126,10 @@ auth.post('/login', async (c) => {
   const useEmailOtp = isEmailEnabled();
   const isProd = !forceCode && useEmailOtp;
   const code = forceCode || (isProd ? String(Math.floor(1000 + Math.random() * 9000)) : '1111');
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+
+  // Invalidate any previous unused OTPs for this email so old codes can't be reused
+  await db.update(otpCodes).set({ used: 1 }).where(and(eq(otpCodes.phone, email), eq(otpCodes.used, 0)));
 
   // Store OTP keyed by email
   await db.insert(otpCodes).values({ phone: email, code, expiresAt });
@@ -175,7 +179,8 @@ auth.post('/verify', async (c) => {
     return c.json({ error: { code: 'VALIDATION', message: 'Invalid input' } }, 400);
   }
 
-  const { email, phone, code, role } = parsed.data;
+  const { phone, code, role } = parsed.data;
+  const email = parsed.data.email?.toLowerCase().trim();
   const otpKey = email || phone || '';
   if (!otpKey) return c.json({ error: { code: 'VALIDATION', message: 'email or phone required' } }, 400);
 
