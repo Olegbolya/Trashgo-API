@@ -83,6 +83,17 @@ export async function sendPushNotification(
       token: fcmToken,
       notification: { title, body },
       data: data ?? {},
+      android: {
+        priority: 'high',
+        notification: {
+          channelId: 'trashgo_default',
+          sound: 'default',
+          priority: 'high',
+          defaultSound: true,
+          defaultVibrateTimings: true,
+          clickAction: 'FLUTTER_NOTIFICATION_CLICK',
+        },
+      },
       webpush: {
         notification: { icon: '/icon-192.png', badge: '/icon-72.png', vibrate: [200, 100, 200] },
         fcmOptions: { link: data?.orderId ? `/order/${data.orderId}` : '/' },

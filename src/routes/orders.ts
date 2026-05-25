@@ -977,6 +977,38 @@ ordersRouter.post('/:id/block-customer', async (c) => {
   return c.json({ data: { ok: true } });
 });
 
+// POST /orders/:id/unassign-contractor — customer removes unresponsive contractor, order reverts to new
+ordersRouter.post('/:id/unassign-contractor', async (c) => {
+  const user = c.get('user');
+  const id = c.req.param('id');
+
+  const current = await db.select().from(orders).where(eq(orders.id, id)).limit(1);
+  if (current.length === 0) return c.json({ error: { code: 'NOT_FOUND', message: 'Order not found' } }, 404);
+  const order = current[0];
+
+  if (order.customerId !== user.userId) return c.json({ error: { code: 'FORBIDDEN', message: 'Only the customer can unassign the contractor' } }, 403);
+  if (order.status !== 'accepted') return c.json({ error: { code: 'INVALID_STATUS', message: 'Order is not in accepted state' } }, 400);
+  if (order.contractorId === null) return c.json({ error: { code: 'NO_CONTRACTOR', message: 'No contractor assigned' } }, 400);
+
+  const prevContractorId = order.contractorId;
+
+  await db.update(orders)
+    .set({ status: 'new', contractorId: null, updatedAt: new Date() })
+    .where(eq(orders.id, id));
+
+  await db.insert(orderHistory).values({
+    orderId: id,
+    status: 'new',
+    note: `Contractor ${prevContractorId} removed by customer ${user.userId} due to no response`,
+  });
+
+  const event = { type: 'order_status', orderId: id, status: 'new', title: 'Заказчик убрал вас с заказа', message: `Заказ #${id.slice(0, 8)}` };
+  emitToUser(prevContractorId, event);
+  notifyUser(prevContractorId, 'Заказчик убрал вас с заказа', `Заказ #${id.slice(0, 8)} · ${order.address}`, id);
+
+  return c.json({ ok: true });
+});
+
 // Helper
 function formatOrder(o: typeof orders.$inferSelect) {
   let photoUrls: string[] = [];
