@@ -323,6 +323,7 @@ async function runMigrations() {
     ['idx_blocked_addresses_customer', `CREATE INDEX IF NOT EXISTS idx_blocked_addresses_customer ON blocked_addresses(customer_id)`],
     ['rate_limits table', `CREATE TABLE IF NOT EXISTS rate_limits (key VARCHAR(200) PRIMARY KEY, count INTEGER NOT NULL DEFAULT 1, reset_at TIMESTAMP NOT NULL)`],
     ['idx_rate_limits_reset', `CREATE INDEX IF NOT EXISTS idx_rate_limits_reset ON rate_limits(reset_at)`],
+    ['users.sbp_bank', `ALTER TABLE users ADD COLUMN IF NOT EXISTS sbp_bank VARCHAR(100)`],
   ];
 
   for (const [name, ddl] of steps) {
