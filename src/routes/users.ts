@@ -7,6 +7,7 @@ import { sendEmailOtp, isEmailEnabled } from '../lib/email.js';
 import { rateLimit } from '../lib/rateLimit.js';
 import { censor } from '../lib/censor.js';
 import { authMiddleware, type JwtPayload } from '../middleware/auth.js';
+import { sendPushNotification } from '../lib/firebase-admin.js';
 
 const usersRouter = new Hono<{ Variables: { user: JwtPayload } }>();
 
@@ -469,6 +470,22 @@ usersRouter.get('/stats', async (c) => {
       ratingCount: Number(ratingRow[0]?.cnt ?? 0),
     },
   });
+});
+
+// Called by Android app when it detects a newer version is available on the server.
+// Sends a system FCM push so the notification appears in the device's notification shade.
+usersRouter.post('/me/update-push', async (c) => {
+  const userId = c.get('user').userId;
+  const [row] = await db.select({ fcmToken: users.fcmToken }).from(users).where(eq(users.id, userId)).limit(1);
+  if (row?.fcmToken) {
+    await sendPushNotification(
+      row.fcmToken,
+      '🔄 Вышла новая версия TrashGo!',
+      'Обновите приложение — доступны новые функции и исправления',
+      { url: '/download' },
+    );
+  }
+  return c.json({ ok: true });
 });
 
 export default usersRouter;
