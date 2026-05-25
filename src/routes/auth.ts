@@ -89,13 +89,6 @@ auth.post('/login', async (c) => {
   const { phone, deliveryEmail } = parsed.data;
   const email = parsed.data.email.toLowerCase().trim();
 
-  // Rate limit by email
-  const retryAfter = await rateLimit(email);
-  if (retryAfter > 0) {
-    c.header('Retry-After', String(retryAfter));
-    return c.json({ error: { code: 'RATE_LIMITED', message: 'Слишком много попыток. Подождите.' } }, 429);
-  }
-
   // Look up user by email (case-insensitive — email already lowercased above)
   const existingByEmail = await db.select({ id: users.id, phone: users.phone, email: users.email, telegramChatId: users.telegramChatId })
     .from(users).where(sql`lower(${users.email}) = ${email}`).limit(1);
@@ -118,9 +111,17 @@ auth.post('/login', async (c) => {
     }
   }
 
-  // New user flow: if not found by email or phone, and no phone provided — ask frontend to show phone field
+  // New user flow: if not found by email or phone, and no phone provided — ask frontend to show phone field.
+  // No rate limit consumed here because no OTP is sent yet.
   if (!existingUser && !phone) {
     return c.json({ data: { otpSent: false, isNewUser: true, needsPhone: true, channel: 'email' } });
+  }
+
+  // Rate limit by email — only counted when we are about to send an OTP
+  const retryAfter = await rateLimit(email);
+  if (retryAfter > 0) {
+    c.header('Retry-After', String(retryAfter));
+    return c.json({ error: { code: 'RATE_LIMITED', message: 'Слишком много попыток. Подождите.' } }, 429);
   }
 
   const forceCode = process.env.TEST_OTP_CODE;

@@ -199,7 +199,10 @@ adminRouter.delete('/users/:id', async (c) => {
     await db.delete(refreshTokens).where(eq(refreshTokens.userId, id));
     await db.delete(supportMessages).where(eq(supportMessages.userId, id));
     await db.execute(sql`DELETE FROM otp_codes WHERE phone = (SELECT phone FROM users WHERE id = ${id})`);
+    await db.execute(sql`DELETE FROM otp_codes WHERE phone = (SELECT email FROM users WHERE id = ${id})`);
     await db.execute(sql`DELETE FROM referrals WHERE referrer_id = ${id} OR referee_id = ${id}`);
+    // Delete all messages sent by this user (FK constraint: messages.sender_id → users.id)
+    await db.delete(messages).where(eq(messages.senderId, id));
 
     await db.delete(users).where(eq(users.id, id));
   } catch (e: any) {
