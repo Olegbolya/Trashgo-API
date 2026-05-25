@@ -3,7 +3,7 @@ import { z } from 'zod';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { nanoid } from 'nanoid';
-import { eq, and, gt, desc, avg, count, isNotNull } from 'drizzle-orm';
+import { eq, and, gt, desc, avg, count, isNotNull, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { users, otpCodes, refreshTokens, referrals, orders } from '../db/schema.js';
 import { checkReferralAchievements } from '../lib/achievements.js';
@@ -96,9 +96,9 @@ auth.post('/login', async (c) => {
     return c.json({ error: { code: 'RATE_LIMITED', message: 'Слишком много попыток. Подождите.' } }, 429);
   }
 
-  // Look up user by email
+  // Look up user by email (case-insensitive — email already lowercased above)
   const existingByEmail = await db.select({ id: users.id, phone: users.phone, email: users.email, telegramChatId: users.telegramChatId })
-    .from(users).where(eq(users.email, email)).limit(1);
+    .from(users).where(sql`lower(${users.email}) = ${email}`).limit(1);
 
   let existingUser = existingByEmail.length > 0 ? existingByEmail[0] : null;
 
@@ -107,10 +107,11 @@ auth.post('/login', async (c) => {
     const byPhone = await db.select({ id: users.id, phone: users.phone, email: users.email, telegramChatId: users.telegramChatId })
       .from(users).where(eq(users.phone, phone)).limit(1);
     if (byPhone.length > 0) {
-      if (byPhone[0].email && byPhone[0].email !== email) {
+      if (byPhone[0].email && byPhone[0].email.toLowerCase() !== email) {
         return c.json({ error: { code: 'EMAIL_MISMATCH', message: 'Этот номер уже привязан к другому email' } }, 409);
       }
-      if (!byPhone[0].email) {
+      if (!byPhone[0].email || byPhone[0].email !== email) {
+        // Normalize stored email to lowercase
         await db.update(users).set({ email }).where(eq(users.id, byPhone[0].id));
       }
       existingUser = { ...byPhone[0], email };
@@ -209,7 +210,7 @@ auth.post('/verify', async (c) => {
 
   // Find user — by email (new flow) or phone (legacy)
   const userRows = email
-    ? await db.select().from(users).where(eq(users.email, email)).limit(1)
+    ? await db.select().from(users).where(sql`lower(${users.email}) = ${email}`).limit(1)
     : await db.select().from(users).where(eq(users.phone, phone!)).limit(1);
 
   // Block frozen accounts
