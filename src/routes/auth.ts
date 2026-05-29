@@ -90,10 +90,14 @@ auth.post('/login', async (c) => {
   const email = parsed.data.email.toLowerCase().trim();
 
   // Look up user by email (case-insensitive — email already lowercased above)
-  const existingByEmail = await db.select({ id: users.id, phone: users.phone, email: users.email, telegramChatId: users.telegramChatId })
+  const existingByEmail = await db.select({ id: users.id, phone: users.phone, email: users.email, telegramChatId: users.telegramChatId, deletedAt: users.deletedAt })
     .from(users).where(sql`lower(${users.email}) = ${email}`).limit(1);
 
   let existingUser = existingByEmail.length > 0 ? existingByEmail[0] : null;
+
+  if (existingUser && (existingUser as any).deletedAt) {
+    return c.json({ error: { code: 'ACCOUNT_DELETED', message: 'Аккаунт был удалён' } }, 403);
+  }
 
   // If not found by email and phone was provided — check if this is an existing user by phone (migration case)
   if (!existingUser && phone) {

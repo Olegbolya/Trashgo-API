@@ -480,6 +480,23 @@ usersRouter.get('/stats', async (c) => {
   });
 });
 
+// DELETE /users/me — soft delete: anonymize PII, mark deletedAt
+usersRouter.delete('/me', async (c) => {
+  const { userId } = c.get('user');
+  const now = new Date();
+  // Anonymize PII immediately; hard-delete after 30 days via cron
+  await db.update(users).set({
+    name: 'Удалённый пользователь',
+    phone: `deleted_${userId.slice(0, 8)}_${now.getTime()}`,
+    email: null,
+    telegramChatId: null,
+    fcmToken: null,
+    inn: null,
+    deletedAt: now,
+  } as any).where(eq(users.id, userId));
+  return c.json({ data: { ok: true } });
+});
+
 // Called by Android app when it detects a newer version is available on the server.
 // Sends a system FCM push so the notification appears in the device's notification shade.
 usersRouter.post('/me/update-push', async (c) => {

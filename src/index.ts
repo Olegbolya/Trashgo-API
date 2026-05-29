@@ -339,6 +339,8 @@ async function runMigrations() {
     ['idx_access_plans_user', `CREATE INDEX IF NOT EXISTS idx_access_plans_user ON access_plans(user_id)`],
     ['enum en_route', `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel = 'en_route' AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'order_status')) THEN ALTER TYPE order_status ADD VALUE 'en_route' AFTER 'accepted'; END IF; END $$`],
     ['col is_verified', `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN NOT NULL DEFAULT false`],
+    ['col cancel_count', `ALTER TABLE users ADD COLUMN IF NOT EXISTS cancel_count INTEGER NOT NULL DEFAULT 0`],
+    ['col deleted_at', `ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP`],
   ];
 
   for (const [name, ddl] of steps) {

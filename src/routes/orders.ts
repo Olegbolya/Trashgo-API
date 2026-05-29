@@ -132,19 +132,20 @@ ordersRouter.get('/available', async (c) => {
     if (!isNaN(cursorDate.getTime())) conditions.push(lt(orders.createdAt, cursorDate) as any);
   }
 
-  // Fetch limit+1 to detect hasMore
-  const result = await db.select()
+  // Fetch limit+1 to detect hasMore, join customer cancelCount for reliability warning
+  const result = await db.select({ order: orders, customerCancelCount: users.cancelCount })
     .from(orders)
+    .leftJoin(users, eq(orders.customerId, users.id))
     .where(and(...conditions))
     .orderBy(desc(orders.createdAt))
     .limit(limit + 1);
 
   const hasMore = result.length > limit;
   const page = hasMore ? result.slice(0, limit) : result;
-  const nextCursor = hasMore ? page[page.length - 1].createdAt.toISOString() : null;
+  const nextCursor = hasMore ? page[page.length - 1].order.createdAt.toISOString() : null;
 
   return c.json({
-    data: page.map(formatOrder),
+    data: page.map(r => ({ ...formatOrder(r.order), customerCancelCount: r.customerCancelCount ?? 0 })),
     meta: { hasMore, nextCursor },
   });
 });
@@ -514,6 +515,11 @@ ordersRouter.patch('/:id/status', async (c) => {
       ? `Contractor released order (reverted to new) by user ${user.userId}`
       : `Status changed by user ${user.userId}`,
   });
+
+  // Increment cancelCount when customer cancels an accepted order (penalty for unreliability)
+  if (status === 'cancelled' && order.status === 'accepted' && order.customerId === user.userId) {
+    db.execute(sql`UPDATE users SET cancel_count = cancel_count + 1 WHERE id = ${order.customerId}`).catch(() => {});
+  }
 
   // Real-time notifications via WebSocket
   const updatedOrder = updated[0];
