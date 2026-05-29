@@ -87,7 +87,7 @@ adminRouter.post('/verify/:id', async (c) => {
   if (!checkAdmin(c)) return forbidden(c);
   const id = c.req.param('id');
   await db.update(users).set({ isVerified: true } as any).where(eq(users.id, id));
-  await notifyUser(id, '✅ Аккаунт верифицирован', 'Ваш аккаунт проверен! Теперь вы можете принимать заказы.').catch(() => {});
+  notifyUser(id, '✅ Аккаунт верифицирован', 'Ваш аккаунт проверен! Теперь вы можете принимать заказы.');
   return c.json({ data: { ok: true } });
 });
 

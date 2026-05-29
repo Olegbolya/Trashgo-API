@@ -101,7 +101,7 @@ auth.post('/login', async (c) => {
 
   // If not found by email and phone was provided — check if this is an existing user by phone (migration case)
   if (!existingUser && phone) {
-    const byPhone = await db.select({ id: users.id, phone: users.phone, email: users.email, telegramChatId: users.telegramChatId })
+    const byPhone = await db.select({ id: users.id, phone: users.phone, email: users.email, telegramChatId: users.telegramChatId, deletedAt: users.deletedAt })
       .from(users).where(eq(users.phone, phone)).limit(1);
     if (byPhone.length > 0) {
       if (byPhone[0].email && byPhone[0].email.toLowerCase() !== email) {
