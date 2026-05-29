@@ -225,8 +225,16 @@ app.post('/api/v1/auth/telegram/webhook', async (c) => {
     if (rows.length > 0) { user = rows[0]; break; }
   }
 
-  if (user && user.telegramChatId !== chatId) {
+  const alreadyLinked = user?.telegramChatId === chatId;
+
+  if (user && !alreadyLinked) {
     await db.update(usersTable).set({ telegramChatId: chatId } as any).where(eq(usersTable.id, user.id));
+  }
+
+  // If already linked — just confirm, don't send OTP (prevents spurious codes on re-open)
+  if (alreadyLinked) {
+    await sendTelegramMessage(chatId, '✅ Ваш Telegram аккаунт успешно привязан к TrashGo\\!\n\nУведомления о заказах будут приходить прямо сюда\\.\n\n🌐 https://trashgo\\-gamma\\.vercel\\.app', true);
+    return c.json({ ok: true });
   }
 
   let otp = null;
