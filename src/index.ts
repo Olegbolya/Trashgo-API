@@ -29,6 +29,7 @@ import { orders as ordersTable, users as usersTable, orderHistory as orderHistor
 import { addClient, connectedCount, emitToUser, setFcmFallback } from './ws.js';
 import { sendPushNotification } from './lib/firebase-admin.js';
 import { startSubscriptionCron } from './lib/subscriptionCron.js';
+import { startAccessPlanNotifyCron } from './lib/accessPlanNotifyCron.js';
 import { hasTelegram, sendTelegramNotification, getBotUsername } from './lib/telegram.js';
 import { notifyUser } from './lib/notify.js';
 import { normalizePhone } from './lib/phone.js';
@@ -438,6 +439,9 @@ setInterval(guardedAutoConfirm, 5 * 60 * 1000);
 
 // Subscription cron — creates orders from active subscriptions every day at 06:00 Moscow time
 startSubscriptionCron();
+
+// Access plan notification cron — sends FCM push for expiring trial/plans at 10:00 Moscow
+startAccessPlanNotifyCron();
 
 // OTP cleanup — delete codes older than 24h once per day (prevents table bloat)
 async function cleanupExpiredOtps() {

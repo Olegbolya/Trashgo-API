@@ -340,6 +340,9 @@ adminRouter.post('/access-plans/:id/confirm', async (c) => {
     confirmedAt: now,
   }).where(eq(accessPlans.id, id));
 
+  const expiryLabel = expiresAt.toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long', year: 'numeric' });
+  notifyUser(plan.userId, '✅ TrashGo', `Абонемент активирован до ${expiryLabel}`);
+
   return c.json({ data: { id, status: 'active', expiresAt: expiresAt.toISOString() } });
 });
 
