@@ -15,7 +15,8 @@ async function send(to: string, subject: string, html: string, text?: string): P
   const payload = { from: FROM, to, subject, html, ...(text ? { text } : {}) };
   const { error } = await resend.emails.send(payload);
   if (error) {
-    console.error('[EMAIL] Send failed, retrying once:', error.message);
+    console.error('[EMAIL] Send failed, retrying in 5s:', error.message);
+    await new Promise(r => setTimeout(r, 5000));
     const retry = await resend.emails.send(payload);
     if (retry.error) {
       console.error('[EMAIL] Retry also failed:', retry.error.message);
