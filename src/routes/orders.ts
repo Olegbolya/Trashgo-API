@@ -851,6 +851,7 @@ ordersRouter.post('/:id/rate', async (c) => {
   const id = c.req.param('id');
   const body = await c.req.json().catch(() => ({}));
   const rating = Number(body?.rating);
+  const review = body?.review ? String(body.review).slice(0, 300).trim() : null;
   if (!rating || rating < 1 || rating > 5) {
     return c.json({ error: { code: 'VALIDATION', message: 'Rating must be 1-5' } }, 400);
   }
@@ -867,7 +868,7 @@ ordersRouter.post('/:id/rate', async (c) => {
   if (order.customerId === user.userId) {
     // Customer rates contractor — atomic to prevent double-rating under concurrent requests
     const ratingUpdate = await db.update(orders)
-      .set({ ratingByCustomer: rating })
+      .set({ ratingByCustomer: rating, ...(review ? { reviewByCustomer: review } : {}) } as any)
       .where(and(eq(orders.id, id), sql`${orders.ratingByCustomer} IS NULL`))
       .returning({ id: orders.id });
     if (ratingUpdate.length === 0) {
@@ -1057,6 +1058,7 @@ function formatOrder(o: typeof orders.$inferSelect) {
     createdAt: o.createdAt.toISOString(),
     updatedAt: o.updatedAt.toISOString(),
     ratingByCustomer: o.ratingByCustomer ?? null,
+    reviewByCustomer: (o as any).reviewByCustomer ?? null,
     ratingByContractor: o.ratingByContractor ?? null,
   };
 }

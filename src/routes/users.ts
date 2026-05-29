@@ -513,4 +513,38 @@ usersRouter.post('/me/update-push', async (c) => {
   return c.json({ ok: true });
 });
 
+// GET /users/contractors/:id/reviews — last 10 reviews for a contractor
+usersRouter.get('/contractors/:id/reviews', async (c) => {
+  const contractorId = c.req.param('id');
+  const rows = await db
+    .select({
+      orderId: orders.id,
+      rating: orders.ratingByCustomer,
+      review: (orders as any).reviewByCustomer,
+      createdAt: orders.updatedAt,
+      customerName: users.name,
+    })
+    .from(orders)
+    .leftJoin(users, eq(orders.customerId, users.id))
+    .where(and(
+      eq(orders.contractorId, contractorId),
+      eq(orders.status, 'completed'),
+      isNotNull(orders.ratingByCustomer),
+    ))
+    .orderBy(desc(orders.updatedAt))
+    .limit(10);
+
+  return c.json({
+    data: rows
+      .filter(r => r.review)
+      .map(r => ({
+        orderId: r.orderId,
+        rating: r.rating,
+        review: r.review,
+        createdAt: r.createdAt.toISOString(),
+        customerName: r.customerName ? r.customerName.split(' ')[0] : 'Заказчик',
+      })),
+  });
+});
+
 export default usersRouter;

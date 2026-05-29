@@ -86,6 +86,7 @@ export const orders = pgTable('orders', {
   asap: boolean('asap').notNull().default(false),
   wasteType: varchar('waste_type', { length: 50 }).notNull().default('household'),
   ratingByCustomer: integer('rating_by_customer'),
+  reviewByCustomer: text('review_by_customer'),
   ratingByContractor: integer('rating_by_contractor'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
