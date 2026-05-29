@@ -2,7 +2,8 @@ import { Hono } from 'hono';
 import { eq, and, isNotNull, avg, count, desc, gt, ne, sql, gte } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '../db/index.js';
-import { users, orders, otpCodes } from '../db/schema.js';
+import { users, orders, otpCodes, accessPlans } from '../db/schema.js';
+import { getSubStatus } from '../lib/subscriptionStatus.js';
 import { sendEmailOtp, isEmailEnabled } from '../lib/email.js';
 import { rateLimit } from '../lib/rateLimit.js';
 import { censor } from '../lib/censor.js';
@@ -58,6 +59,8 @@ usersRouter.get('/me', async (c) => {
   let parsedAddresses: string[] = [];
   try { parsedAddresses = JSON.parse(u.addresses || '[]'); } catch {}
 
+  const { status: subscriptionStatus, expiresAt: subExpiresAt } = await getSubStatus(userId);
+
   return c.json({
     data: {
       id: u.id,
@@ -85,6 +88,8 @@ usersRouter.get('/me', async (c) => {
       frozen: u.frozen ?? false,
       freezeReason: u.freezeReason ?? null,
       createdAt: u.createdAt.toISOString(),
+      subscriptionStatus,
+      subscriptionExpiresAt: subExpiresAt?.toISOString() ?? null,
     },
   });
 });

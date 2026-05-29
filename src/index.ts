@@ -16,6 +16,7 @@ import usersRoutes from './routes/users.js';
 import referralsRoutes from './routes/referrals.js';
 import achievementsRoutes from './routes/achievements.js';
 import subscriptionsRoutes from './routes/subscriptions.js';
+import accessPlansRoutes from './routes/access-plans.js';
 import leaderboardRoutes from './routes/leaderboard.js';
 import adminRoutes from './routes/admin.js';
 import supportRoutes from './routes/support.js';
@@ -109,6 +110,7 @@ app.route('/api/v1/users', usersRoutes);
 app.route('/api/v1/referrals', referralsRoutes);
 app.route('/api/v1/achievements', achievementsRoutes);
 app.route('/api/v1/subscriptions', subscriptionsRoutes);
+app.route('/api/v1/access-plans', accessPlansRoutes);
 app.route('/api/v1/leaderboard', leaderboardRoutes);
 app.route('/api/v1/admin', adminRoutes);
 app.route('/api/v1/support', supportRoutes);
@@ -332,6 +334,8 @@ async function runMigrations() {
     ['rate_limits table', `CREATE TABLE IF NOT EXISTS rate_limits (key VARCHAR(200) PRIMARY KEY, count INTEGER NOT NULL DEFAULT 1, reset_at TIMESTAMP NOT NULL)`],
     ['idx_rate_limits_reset', `CREATE INDEX IF NOT EXISTS idx_rate_limits_reset ON rate_limits(reset_at)`],
     ['users.sbp_bank', `ALTER TABLE users ADD COLUMN IF NOT EXISTS sbp_bank VARCHAR(100)`],
+    ['access_plans table', `CREATE TABLE IF NOT EXISTS access_plans (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID NOT NULL REFERENCES users(id), status VARCHAR(20) NOT NULL DEFAULT 'pending', price_at_purchase INTEGER NOT NULL DEFAULT 50, payment_ref VARCHAR(200), starts_at TIMESTAMP, expires_at TIMESTAMP, confirmed_at TIMESTAMP, created_at TIMESTAMP NOT NULL DEFAULT NOW())`],
+    ['idx_access_plans_user', `CREATE INDEX IF NOT EXISTS idx_access_plans_user ON access_plans(user_id)`],
   ];
 
   for (const [name, ddl] of steps) {

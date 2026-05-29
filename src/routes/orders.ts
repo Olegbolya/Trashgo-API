@@ -18,6 +18,7 @@ import {
 } from '../lib/email.js';
 import { notifyUser } from '../lib/notify.js';
 import { censor } from '../lib/censor.js';
+import { hasActiveSubscription } from '../lib/subscriptionStatus.js';
 
 const ordersRouter = new Hono<{ Variables: { user: JwtPayload } }>();
 
@@ -112,6 +113,11 @@ ordersRouter.get('/', async (c) => {
 // ?district=X&cursor=<ISO timestamp>&limit=20
 ordersRouter.get('/available', async (c) => {
   const user = c.get('user');
+
+  if (!await hasActiveSubscription(user.userId)) {
+    return c.json({ error: { code: 'SUBSCRIPTION_REQUIRED', message: 'Необходим активный абонемент для просмотра заказов' } }, 403);
+  }
+
   const district = c.req.query('district') || null;
   const cursor = c.req.query('cursor') || null;
   const limit = Math.min(50, Math.max(1, parseInt(c.req.query('limit') ?? '20', 10) || 20));
@@ -321,6 +327,10 @@ ordersRouter.patch('/:id', async (c) => {
 // POST /orders — create an order (any authenticated user)
 ordersRouter.post('/', async (c) => {
   const user = c.get('user');
+
+  if (!await hasActiveSubscription(user.userId)) {
+    return c.json({ error: { code: 'SUBSCRIPTION_REQUIRED', message: 'Необходим активный абонемент для создания заказов' } }, 403);
+  }
 
   // Rate limit: max 10 orders per hour per user
   const retryAfter = await rateLimit(`order:${user.userId}`, 10, 60 * 60 * 1000);

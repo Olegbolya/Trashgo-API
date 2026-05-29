@@ -182,3 +182,18 @@ export const rateLimits = pgTable('rate_limits', {
 }, (table) => [
   index('idx_rate_limits_reset').on(table.resetAt),
 ]);
+
+// Access plans (monthly 50₽ service subscription — distinct from recurring pickup schedules)
+export const accessPlans = pgTable('access_plans', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  status: varchar('status', { length: 20 }).notNull().default('pending'), // pending | active | expired
+  priceAtPurchase: integer('price_at_purchase').notNull().default(50),
+  paymentRef: varchar('payment_ref', { length: 200 }),
+  startsAt: timestamp('starts_at'),
+  expiresAt: timestamp('expires_at'),
+  confirmedAt: timestamp('confirmed_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (table) => [
+  index('idx_access_plans_user').on(table.userId),
+]);

@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { eq, count, sum, like, desc, sql, or, ilike, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { users, orders, orderHistory, supportMessages, blockedAddresses, referrals, userAchievements, refreshTokens, otpCodes, messages, subscriptions } from '../db/schema.js';
+import { users, orders, orderHistory, supportMessages, blockedAddresses, referrals, userAchievements, refreshTokens, otpCodes, messages, subscriptions, accessPlans } from '../db/schema.js';
 import { notifyUser } from '../lib/notify.js';
 
 const adminRouter = new Hono();
@@ -292,6 +292,70 @@ adminRouter.post('/run-subscription-cron', async (c) => {
   const { runSubscriptionCron } = await import('../lib/subscriptionCron.js');
   await runSubscriptionCron();
   return c.json({ data: { ok: true, note: 'Ran. Creates orders only during 06:00 Moscow hour unless that window is active.' } });
+});
+
+// GET /admin/access-plans/pending — list pending payment requests
+adminRouter.get('/access-plans/pending', async (c) => {
+  if (!checkAdmin(c)) return forbidden(c);
+
+  const rows = await db.select({
+    plan: accessPlans,
+    userName: users.name,
+    userPhone: users.phone,
+    userCreatedAt: users.createdAt,
+  })
+    .from(accessPlans)
+    .leftJoin(users, eq(accessPlans.userId, users.id))
+    .where(eq(accessPlans.status, 'pending'))
+    .orderBy(desc(accessPlans.createdAt));
+
+  return c.json({ data: rows.map(r => ({
+    id: r.plan.id,
+    userId: r.plan.userId,
+    userName: r.userName ?? '—',
+    userPhone: r.userPhone ?? '—',
+    priceAtPurchase: r.plan.priceAtPurchase,
+    paymentRef: r.plan.paymentRef,
+    createdAt: r.plan.createdAt.toISOString(),
+    userRegisteredAt: r.userCreatedAt?.toISOString() ?? null,
+  })) });
+});
+
+// POST /admin/access-plans/:id/confirm — activate a pending plan (30 days from now)
+adminRouter.post('/access-plans/:id/confirm', async (c) => {
+  if (!checkAdmin(c)) return forbidden(c);
+
+  const id = c.req.param('id');
+  const [plan] = await db.select().from(accessPlans).where(eq(accessPlans.id, id)).limit(1);
+  if (!plan) return c.json({ error: { code: 'NOT_FOUND' } }, 404);
+  if (plan.status !== 'pending') return c.json({ error: { code: 'NOT_PENDING', message: 'Plan is not in pending state' } }, 409);
+
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+  await db.update(accessPlans).set({
+    status: 'active',
+    startsAt: now,
+    expiresAt,
+    confirmedAt: now,
+  }).where(eq(accessPlans.id, id));
+
+  return c.json({ data: { id, status: 'active', expiresAt: expiresAt.toISOString() } });
+});
+
+// POST /admin/access-plans/:id/reject — reject and remove a pending plan
+adminRouter.post('/access-plans/:id/reject', async (c) => {
+  if (!checkAdmin(c)) return forbidden(c);
+
+  const id = c.req.param('id');
+  const [plan] = await db.select({ id: accessPlans.id, status: accessPlans.status })
+    .from(accessPlans).where(eq(accessPlans.id, id)).limit(1);
+  if (!plan) return c.json({ error: { code: 'NOT_FOUND' } }, 404);
+  if (plan.status !== 'pending') return c.json({ error: { code: 'NOT_PENDING' } }, 409);
+
+  await db.delete(accessPlans).where(eq(accessPlans.id, id));
+
+  return c.json({ data: { id, deleted: true } });
 });
 
 export default adminRouter;
