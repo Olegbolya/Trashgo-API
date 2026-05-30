@@ -1,9 +1,10 @@
 import { Hono } from 'hono';
 import { eq, and, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { accessPlans } from '../db/schema.js';
+import { accessPlans, users } from '../db/schema.js';
 import { authMiddleware, type JwtPayload } from '../middleware/auth.js';
 import { getSubStatus, countActiveReferees, PLAN_PRICE, REFERRAL_DISCOUNT } from '../lib/subscriptionStatus.js';
+import { notifyAdmin } from '../lib/telegram.js';
 
 const router = new Hono<{ Variables: { user: JwtPayload } }>();
 router.use('*', authMiddleware);
@@ -79,6 +80,16 @@ router.post('/request', async (c) => {
     priceAtPurchase,
     ...(paymentRef ? { paymentRef } : {}),
   }).returning();
+
+  // Notify admin
+  const [userRow] = await db.select({ name: users.name, phone: users.phone }).from(users).where(eq(users.id, userId)).limit(1);
+  notifyAdmin(
+    `💳 *Новый запрос на абонемент*\n\n` +
+    `Пользователь: ${userRow?.name ?? '—'}\n` +
+    `Сумма: ${priceAtPurchase}₽\n` +
+    (paymentRef ? `Реквизит: ${paymentRef}\n` : '') +
+    `\nПодтвердите в /admin → Абонементы`
+  ).catch(() => {});
 
   return c.json({ data: {
     id: plan.id,
