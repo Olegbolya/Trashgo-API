@@ -1,9 +1,10 @@
 import { Hono } from 'hono';
-import { eq, count, sum, like, desc, sql, or, ilike, and } from 'drizzle-orm';
+import { eq, count, sum, like, desc, sql, or, ilike, and, isNotNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { users, orders, orderHistory, supportMessages, blockedAddresses, referrals, userAchievements, refreshTokens, otpCodes, messages, subscriptions, accessPlans } from '../db/schema.js';
 import { notifyUser } from '../lib/notify.js';
 import { notifyAdmin } from '../lib/telegram.js';
+import { sendPushNotification } from '../lib/firebase-admin.js';
 
 const adminRouter = new Hono();
 
@@ -442,6 +443,30 @@ adminRouter.post('/users/:id/extend-subscription', async (c) => {
   notifyUser(id, '✅ TrashGo', `Абонемент продлён до ${expiryLabel}`);
 
   return c.json({ data: { userId: id, expiresAt: newExpiry.toISOString() } });
+});
+
+// POST /admin/broadcast-update — push "update available" to all users with FCM tokens
+adminRouter.post('/broadcast-update', async (c) => {
+  if (!checkAdmin(c)) return forbidden(c);
+
+  const rows = await db.select({ id: users.id, fcmToken: users.fcmToken })
+    .from(users)
+    .where(isNotNull(users.fcmToken));
+
+  let sent = 0;
+  let failed = 0;
+  for (const row of rows) {
+    if (!row.fcmToken) continue;
+    const ok = await sendPushNotification(
+      row.fcmToken,
+      '🔄 Вышла новая версия TrashGo!',
+      'Обновите приложение — доступны новые функции',
+      { url: '/download' },
+    );
+    if (ok) sent++; else failed++;
+  }
+
+  return c.json({ data: { sent, failed, total: rows.length } });
 });
 
 export default adminRouter;
