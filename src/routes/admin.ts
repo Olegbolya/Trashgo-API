@@ -404,4 +404,44 @@ adminRouter.post('/access-plans/:id/reject', async (c) => {
   return c.json({ data: { id, deleted: true } });
 });
 
+// POST /admin/users/:id/extend-subscription — grant or extend +30 days access plan
+adminRouter.post('/users/:id/extend-subscription', async (c) => {
+  if (!checkAdmin(c)) return forbidden(c);
+  const id = c.req.param('id');
+
+  const [user] = await db.select({ id: users.id }).from(users).where(eq(users.id, id)).limit(1);
+  if (!user) return c.json({ error: { code: 'NOT_FOUND', message: 'User not found' } }, 404);
+
+  const now = new Date();
+
+  // Find existing active plan to extend from its expiry; otherwise start from now
+  const [existing] = await db.select({ id: accessPlans.id, expiresAt: accessPlans.expiresAt, status: accessPlans.status })
+    .from(accessPlans)
+    .where(and(eq(accessPlans.userId, id), eq(accessPlans.status, 'active')))
+    .orderBy(desc(accessPlans.expiresAt))
+    .limit(1);
+
+  const baseDate = (existing?.expiresAt && existing.expiresAt > now) ? existing.expiresAt : now;
+  const newExpiry = new Date(baseDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+  if (existing) {
+    await db.update(accessPlans).set({ expiresAt: newExpiry }).where(eq(accessPlans.id, existing.id));
+  } else {
+    await db.insert(accessPlans).values({
+      userId: id,
+      status: 'active',
+      priceAtPurchase: 0,
+      paymentRef: 'admin-grant',
+      startsAt: now,
+      expiresAt: newExpiry,
+      confirmedAt: now,
+    } as any);
+  }
+
+  const expiryLabel = newExpiry.toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long', year: 'numeric' });
+  notifyUser(id, '✅ TrashGo', `Абонемент продлён до ${expiryLabel}`);
+
+  return c.json({ data: { userId: id, expiresAt: newExpiry.toISOString() } });
+});
+
 export default adminRouter;
