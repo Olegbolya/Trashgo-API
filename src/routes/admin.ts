@@ -40,6 +40,16 @@ adminRouter.get('/stats', async (c) => {
   const [recentOrders] = await db.select({ cnt: sql<number>`count(*)::int` })
     .from(orders).where(sql`created_at > now() - interval '7 days'`);
 
+  const [activeSubscribers] = await db.select({ cnt: sql<number>`count(*)::int` })
+    .from(accessPlans).where(and(eq(accessPlans.status, 'active'), sql`${accessPlans.expiresAt} > NOW()`));
+
+  const [trialUsers] = await db.select({ cnt: sql<number>`count(*)::int` })
+    .from(users).where(sql`created_at > now() - interval '30 days'`);
+
+  const [monthlyRevenue] = await db.select({ total: sum(accessPlans.priceAtPurchase) })
+    .from(accessPlans)
+    .where(and(eq(accessPlans.status, 'active'), sql`${accessPlans.createdAt} > date_trunc('month', NOW())`));
+
   const statusMap: Record<string, number> = {};
   orderStats.forEach(s => { statusMap[s.status] = Number(s.cnt); });
 
@@ -51,6 +61,9 @@ adminRouter.get('/stats', async (c) => {
     disputes: Number(disputes?.cnt ?? 0),
     paymentDisputes: Number(paymentDisputes?.cnt ?? 0),
     recentOrders: Number(recentOrders?.cnt ?? 0),
+    activeSubscribers: Number(activeSubscribers?.cnt ?? 0),
+    trialUsers: Number(trialUsers?.cnt ?? 0),
+    subscriptionRevenue: Number(monthlyRevenue?.total ?? 0),
   } });
 });
 
@@ -145,6 +158,7 @@ adminRouter.get('/users', async (c) => {
     frozen: users.frozen, freezeReason: users.freezeReason,
     balance: users.balance, xp: users.xp, createdAt: users.createdAt,
     telegramLinked: users.telegramChatId,
+    isVerified: users.isVerified,
   };
 
   const rows = q
@@ -157,8 +171,27 @@ adminRouter.get('/users', async (c) => {
   const hasMore = !q && rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
 
+  // Bulk-fetch active access plans for returned users
+  const userIds = page.map(r => r.id);
+  const now = new Date();
+  const TRIAL_MS = 30 * 24 * 60 * 60 * 1000;
+  const activePlans = userIds.length > 0
+    ? await db.select({ userId: accessPlans.userId }).from(accessPlans)
+        .where(and(
+          sql`${accessPlans.userId} = ANY(ARRAY[${sql.raw(userIds.map(id => `'${id}'`).join(','))}]::uuid[])`,
+          eq(accessPlans.status, 'active'),
+          sql`${accessPlans.expiresAt} > NOW()`,
+        ))
+    : [];
+  const activePlanSet = new Set(activePlans.map(p => p.userId));
+
   return c.json({
-    data: page.map(r => ({ ...r, telegramLinked: !!r.telegramLinked })),
+    data: page.map(r => {
+      const subStatus = (now.getTime() - r.createdAt.getTime()) < TRIAL_MS
+        ? 'trial'
+        : activePlanSet.has(r.id) ? 'active' : 'expired';
+      return { ...r, telegramLinked: !!r.telegramLinked, subscriptionStatus: subStatus };
+    }),
     meta: { hasMore, nextOffset: hasMore ? offset + limit : null },
   });
 });
