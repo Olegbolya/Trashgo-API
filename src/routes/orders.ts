@@ -67,10 +67,12 @@ const completeOrderSchema = z.object({
 // GET /orders — list my orders (offset pagination)
 // ?mode=contractor → orders I accepted (contractorId = me)
 // ?offset=0&limit=20
+// ?export=csv → download as CSV (mode=contractor only, limit capped at 1000)
 ordersRouter.get('/', async (c) => {
   const user = c.get('user');
   const mode = c.req.query('mode');
-  const limit = Math.min(50, Math.max(1, parseInt(c.req.query('limit') ?? '20', 10) || 20));
+  const exportCsv = c.req.query('export') === 'csv';
+  const limit = exportCsv ? 1000 : Math.min(50, Math.max(1, parseInt(c.req.query('limit') ?? '20', 10) || 20));
   const offset = Math.max(0, parseInt(c.req.query('offset') ?? '0', 10) || 0);
 
   const cu = alias(users, 'cu'); // counterpart user alias
@@ -83,7 +85,7 @@ ordersRouter.get('/', async (c) => {
         .leftJoin(cu, eq(cu.id, orders.customerId))
         .where(eq(orders.contractorId, user.userId))
         .orderBy(desc(orders.createdAt))
-        .limit(limit + 1)
+        .limit(exportCsv ? 1000 : limit + 1)
         .offset(offset)
     : await db
         .select({ order: orders, counterpartName: cu.name })
@@ -93,6 +95,41 @@ ordersRouter.get('/', async (c) => {
         .orderBy(desc(orders.createdAt))
         .limit(limit + 1)
         .offset(offset);
+
+  if (exportCsv && mode === 'contractor') {
+    const csvEsc = (s: string | number | null | undefined) => {
+      const v = String(s ?? '').replace(/"/g, '""');
+      return v.includes(',') || v.includes('"') || v.includes('\n') ? `"${v}"` : v;
+    };
+    const statusLabel: Record<string, string> = {
+      new: 'Новый', accepted: 'Принят', en_route: 'В пути', in_progress: 'Выполняется',
+      pending_confirmation: 'Ожидает подтверждения', pending_payment: 'Ожидает оплаты',
+      completed: 'Выполнен', cancelled: 'Отменён',
+    };
+    const wasteLabel: Record<string, string> = { household: 'Бытовой', construction: 'Строительный', bulky: 'Крупногабаритный' };
+    const header = ['Дата', 'Адрес', 'Район', 'Мешков', 'Цена (₽)', 'Статус', 'Тип мусора', 'Оценка заказчика', 'Комментарий'].join(',');
+    const rows = result.map(({ order: o }) =>
+      [
+        new Date(o.createdAt).toLocaleDateString('ru-RU'),
+        o.address,
+        o.district,
+        o.volume,
+        o.price,
+        statusLabel[o.status] ?? o.status,
+        wasteLabel[o.wasteType ?? ''] ?? o.wasteType ?? '',
+        o.ratingByCustomer ?? '',
+        o.reviewByCustomer ?? '',
+      ].map(csvEsc).join(',')
+    );
+    const csv = '﻿' + [header, ...rows].join('\r\n'); // BOM for Excel UTF-8
+    const filename = `trashgo-orders-${new Date().toISOString().slice(0, 10)}.csv`;
+    return new Response(csv, {
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+      },
+    });
+  }
 
   const hasMore = result.length > limit;
   const page = hasMore ? result.slice(0, limit) : result;
